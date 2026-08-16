@@ -207,7 +207,8 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     pdf_path = _validate_pdf_path(args.input_pdf)
-    output_path = args.output or pdf_path.with_name(f"{pdf_path.stem}_mineru_raw.json")
+    project_dir = Path(__file__).resolve().parent
+    output_path = args.output or project_dir / f"{pdf_path.stem}_mineru_raw.json"
     run_parse(
         pdf_path,
         output_path,

@@ -4,11 +4,29 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import patch
 
 import httpx
 
 
 class MinerURawParseTest(TestCase):
+    def test_main_defaults_output_to_project_directory(self):
+        import mineru_raw_parse
+
+        with TemporaryDirectory() as temp_dir:
+            pdf_path = Path(temp_dir) / "contract.pdf"
+            pdf_path.write_bytes(b"%PDF-test")
+            expected_output = (
+                Path(mineru_raw_parse.__file__).resolve().parent
+                / "contract_mineru_raw.json"
+            )
+
+            with patch.object(mineru_raw_parse, "run_parse") as run_parse:
+                mineru_raw_parse.main([str(pdf_path)])
+
+            run_parse.assert_called_once()
+            self.assertEqual(run_parse.call_args.args[1], expected_output)
+
     def test_saves_raw_content_list_and_prints_statistics(self):
         import mineru_raw_parse
 

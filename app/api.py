@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.config import Settings, load_settings
 from app.db import ContractRepository
 from app.index_manager import IndexManager
+from app.markdown import render_markdown
 from app.pipeline import ContractProcessor
 from app.service import (
     ContractNotFoundError,
@@ -73,27 +74,39 @@ def create_app(
     templates = Jinja2Templates(
         directory=str(Path(__file__).resolve().parent / "templates")
     )
+    templates.env.filters["markdown"] = render_markdown
 
-    def render_page(
+    def render_dashboard(
         request: Request,
         *,
-        contract_id: str | None = None,
-        answer_result: dict[str, Any] | None = None,
-        question: str = "",
-        debug: bool = False,
         error: str | None = None,
     ) -> HTMLResponse:
         contracts = active_service.list_contracts()
-        selected_contract = (
-            active_service.get_contract(contract_id)
-            if contract_id
-            else (contracts[0] if contracts else None)
-        )
         return templates.TemplateResponse(
             request=request,
             name="index.html",
             context={
                 "contracts": contracts,
+                "error": error,
+            },
+        )
+
+    def render_chat_page(
+        request: Request,
+        contract_id: str,
+        *,
+        answer_result: dict[str, Any] | None = None,
+        question: str = "",
+        debug: bool = False,
+        error: str | None = None,
+    ) -> HTMLResponse:
+        selected_contract = active_service.get_contract(contract_id)
+        if selected_contract is None:
+            raise HTTPException(status_code=404, detail="contract not found")
+        return templates.TemplateResponse(
+            request=request,
+            name="chat.html",
+            context={
                 "selected_contract": selected_contract,
                 "answer_result": answer_result,
                 "question": question,
@@ -101,6 +114,59 @@ def create_app(
                 "error": error,
             },
         )
+
+    def render_chat_result(
+        request: Request,
+        contract_id: str,
+        question: str,
+        debug: bool,
+    ) -> HTMLResponse:
+        question = question.strip()
+        if not question:
+            return render_chat_page(
+                request,
+                contract_id,
+                question=question,
+                debug=debug,
+                error="请输入问题。",
+            )
+        try:
+            result = active_service.ask(contract_id, question, debug)
+            return render_chat_page(
+                request,
+                contract_id,
+                answer_result=result,
+                question=question,
+                debug=debug,
+            )
+        except ContractNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="contract not found") from exc
+        except ContractNotReadyError as exc:
+            return render_chat_page(
+                request,
+                contract_id,
+                question=question,
+                debug=debug,
+                error=f"合同当前状态为 {exc.record.status}，请等待入库完成。",
+            )
+        except FileNotFoundError as exc:
+            logger.exception("persisted index unavailable for %s", contract_id)
+            return render_chat_page(
+                request,
+                contract_id,
+                question=question,
+                debug=debug,
+                error="持久化索引不存在，请重新入库后再试。",
+            )
+        except Exception:
+            logger.exception("server-rendered question failed for %s", contract_id)
+            return render_chat_page(
+                request,
+                contract_id,
+                question=question,
+                debug=debug,
+                error="提问失败，请稍后重试。",
+            )
 
     @application.post("/api/contracts", status_code=202)
     async def upload_contract(
@@ -153,8 +219,8 @@ def create_app(
             raise HTTPException(status_code=500, detail="question failed") from exc
 
     @application.get("/", response_class=HTMLResponse)
-    def home(request: Request, contract_id: str | None = None) -> HTMLResponse:
-        return render_page(request, contract_id=contract_id)
+    def home(request: Request) -> HTMLResponse:
+        return render_dashboard(request)
 
     @application.post("/upload", response_class=HTMLResponse)
     async def upload_page(
@@ -168,12 +234,9 @@ def create_app(
                 await file.read(),
             )
         except ValueError as exc:
-            return render_page(request, error=str(exc))
+            return render_dashboard(request, error=str(exc))
         background_tasks.add_task(active_service.processor.process, record.contract_id)
-        return RedirectResponse(
-            url=f"/?contract_id={record.contract_id}",
-            status_code=303,
-        )
+        return RedirectResponse(url="/", status_code=303)
 
     @application.post("/chat", response_class=HTMLResponse)
     def chat_page(
@@ -182,33 +245,22 @@ def create_app(
         question: str = Form(...),
         debug: bool = Form(False),
     ) -> HTMLResponse:
-        try:
-            result = active_service.ask(contract_id, question.strip(), debug)
-            return render_page(
-                request,
-                contract_id=contract_id,
-                answer_result=result,
-                question=question,
-                debug=debug,
-            )
-        except ContractNotFoundError:
-            return render_page(request, error="合同不存在")
-        except ContractNotReadyError as exc:
-            return render_page(
-                request,
-                contract_id=contract_id,
-                question=question,
-                debug=debug,
-                error=f"合同当前状态为 {exc.record.status}，请等待入库完成。",
-            )
-        except Exception:
-            logger.exception("server-rendered question failed for %s", contract_id)
-            return render_page(
-                request,
-                contract_id=contract_id,
-                question=question,
-                debug=debug,
-                error="提问失败，请稍后重试。",
-            )
+        return render_chat_result(request, contract_id, question, debug)
+
+    @application.get("/contracts/{contract_id}", response_class=HTMLResponse)
+    def contract_page(request: Request, contract_id: str) -> HTMLResponse:
+        return render_chat_page(request, contract_id)
+
+    @application.post(
+        "/contracts/{contract_id}/chat",
+        response_class=HTMLResponse,
+    )
+    def contract_chat_page(
+        request: Request,
+        contract_id: str,
+        question: str = Form(...),
+        debug: bool = Form(False),
+    ) -> HTMLResponse:
+        return render_chat_result(request, contract_id, question, debug)
 
     return application
