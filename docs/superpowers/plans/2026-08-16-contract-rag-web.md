@@ -328,7 +328,7 @@ class ContractProcessorTest(TestCase):
             contract_dir.mkdir(parents=True)
             (contract_dir / "source.pdf").write_bytes(b"%PDF")
             repository = ContractRepository(settings.database_path)
-            repository.create("contract.pdf", contract_dir)
+            contract = repository.create("contract.pdf", contract_dir)
             manager = IndexManager(object())
             fake_index = SimpleNamespace(storage_context=Mock())
             call_order = []
@@ -348,7 +348,7 @@ class ContractProcessorTest(TestCase):
                 for path in ("raw_content_list.json", "cleaned_content_list.json", "merged_content_list.json"):
                     (contract_dir / path).write_text("[]", encoding="utf-8")
                 processor = ContractProcessor(repository, settings, manager)
-                result = processor.process("c1")
+                result = processor.process(contract.contract_id)
 
         self.assertEqual(result.status, "ready")
         self.assertEqual(call_order, ["parse", "clean", "merge", "context", "save_context", "nodes"])
@@ -362,11 +362,11 @@ class ContractProcessorTest(TestCase):
             contract_dir.mkdir(parents=True)
             (contract_dir / "source.pdf").write_bytes(b"%PDF")
             repository = ContractRepository(settings.database_path)
-            repository.create("contract.pdf", contract_dir)
+            contract = repository.create("contract.pdf", contract_dir)
             processor = ContractProcessor(repository, settings, IndexManager(object()))
 
             with patch("app.pipeline.run_parse", side_effect=RuntimeError("parse failed")):
-                result = processor.process("c1")
+                result = processor.process(contract.contract_id)
 
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.error_message, "parse failed")
