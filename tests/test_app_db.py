@@ -1,11 +1,36 @@
+import sqlite3
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import patch
 
 from app.db import ContractRepository
 
 
 class ContractRepositoryTest(TestCase):
+    def test_read_closes_sqlite_connection(self):
+        with TemporaryDirectory() as temp_dir:
+            repository = ContractRepository(Path(temp_dir) / "contracts.db")
+            connection = sqlite3.connect(repository.database_path)
+            repository._connect = lambda: connection
+
+            repository.get("missing")
+
+            with self.assertRaises(sqlite3.ProgrammingError):
+                connection.execute("SELECT 1")
+
+    def test_write_closes_sqlite_connection(self):
+        with TemporaryDirectory() as temp_dir:
+            repository = ContractRepository(Path(temp_dir) / "contracts.db")
+            connection = sqlite3.connect(repository.database_path)
+            repository._connect = lambda: connection
+
+            with patch.object(repository, "get", return_value=None):
+                repository.create("contract.pdf", Path(temp_dir) / "contract")
+
+            with self.assertRaises(sqlite3.ProgrammingError):
+                connection.execute("SELECT 1")
+
     def test_create_update_get_and_list_contracts(self):
         with TemporaryDirectory() as temp_dir:
             repository = ContractRepository(Path(temp_dir) / "contracts.db")

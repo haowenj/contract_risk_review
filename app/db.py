@@ -3,8 +3,10 @@ from __future__ import annotations
 import sqlite3
 import threading
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from collections.abc import Iterator
 
 from app.models import ContractRecord
 
@@ -25,8 +27,20 @@ class ContractRepository:
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        connection = self._connect()
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
     def _initialize(self) -> None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS contracts (
@@ -65,7 +79,7 @@ class ContractRepository:
     def create(self, filename: str, storage_dir: Path) -> ContractRecord:
         contract_id = str(uuid.uuid4())
         timestamp = self._now()
-        with self._write_lock, self._connect() as connection:
+        with self._write_lock, self._connection() as connection:
             connection.execute(
                 """
                 INSERT INTO contracts (
@@ -78,7 +92,7 @@ class ContractRepository:
         return self.get(contract_id)  # type: ignore[return-value]
 
     def get(self, contract_id: str) -> ContractRecord | None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = connection.execute(
                 "SELECT * FROM contracts WHERE contract_id = ?",
                 (contract_id,),
@@ -86,7 +100,7 @@ class ContractRepository:
         return self._record_from_row(row)
 
     def list(self) -> list[ContractRecord]:
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 "SELECT * FROM contracts ORDER BY sequence DESC"
             ).fetchall()
@@ -102,7 +116,7 @@ class ContractRepository:
             raise ValueError(f"unsupported contract status: {status}")
 
         timestamp = self._now()
-        with self._write_lock, self._connect() as connection:
+        with self._write_lock, self._connection() as connection:
             cursor = connection.execute(
                 """
                 UPDATE contracts
