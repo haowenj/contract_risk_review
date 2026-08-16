@@ -1,9 +1,20 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
+from fastapi import (
+    BackgroundTasks,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+)
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
 
 from app.config import Settings, load_settings
@@ -59,6 +70,37 @@ def create_app(
     settings = settings or load_settings()
     active_service = service or build_default_service(settings)
     application = FastAPI(title="Contract Risk Review")
+    templates = Jinja2Templates(
+        directory=str(Path(__file__).resolve().parent / "templates")
+    )
+
+    def render_page(
+        request: Request,
+        *,
+        contract_id: str | None = None,
+        answer_result: dict[str, Any] | None = None,
+        question: str = "",
+        debug: bool = False,
+        error: str | None = None,
+    ) -> HTMLResponse:
+        contracts = active_service.list_contracts()
+        selected_contract = (
+            active_service.get_contract(contract_id)
+            if contract_id
+            else (contracts[0] if contracts else None)
+        )
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context={
+                "contracts": contracts,
+                "selected_contract": selected_contract,
+                "answer_result": answer_result,
+                "question": question,
+                "debug": debug,
+                "error": error,
+            },
+        )
 
     @application.post("/api/contracts", status_code=202)
     async def upload_contract(
@@ -109,5 +151,64 @@ def create_app(
         except Exception as exc:
             logger.exception("contract question failed for %s", contract_id)
             raise HTTPException(status_code=500, detail="question failed") from exc
+
+    @application.get("/", response_class=HTMLResponse)
+    def home(request: Request, contract_id: str | None = None) -> HTMLResponse:
+        return render_page(request, contract_id=contract_id)
+
+    @application.post("/upload", response_class=HTMLResponse)
+    async def upload_page(
+        request: Request,
+        background_tasks: BackgroundTasks,
+        file: UploadFile = File(...),
+    ) -> Response:
+        try:
+            record = active_service.create_upload(
+                file.filename or "",
+                await file.read(),
+            )
+        except ValueError as exc:
+            return render_page(request, error=str(exc))
+        background_tasks.add_task(active_service.processor.process, record.contract_id)
+        return RedirectResponse(
+            url=f"/?contract_id={record.contract_id}",
+            status_code=303,
+        )
+
+    @application.post("/chat", response_class=HTMLResponse)
+    def chat_page(
+        request: Request,
+        contract_id: str = Form(...),
+        question: str = Form(...),
+        debug: bool = Form(False),
+    ) -> HTMLResponse:
+        try:
+            result = active_service.ask(contract_id, question.strip(), debug)
+            return render_page(
+                request,
+                contract_id=contract_id,
+                answer_result=result,
+                question=question,
+                debug=debug,
+            )
+        except ContractNotFoundError:
+            return render_page(request, error="合同不存在")
+        except ContractNotReadyError as exc:
+            return render_page(
+                request,
+                contract_id=contract_id,
+                question=question,
+                debug=debug,
+                error=f"合同当前状态为 {exc.record.status}，请等待入库完成。",
+            )
+        except Exception:
+            logger.exception("server-rendered question failed for %s", contract_id)
+            return render_page(
+                request,
+                contract_id=contract_id,
+                question=question,
+                debug=debug,
+                error="提问失败，请稍后重试。",
+            )
 
     return application

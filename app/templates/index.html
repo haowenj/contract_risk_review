@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>合同风险审阅</title>
+  <style>
+    :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; color: #1f2937; background: #f3f4f6; }
+    main { display: grid; grid-template-columns: 310px 1fr; min-height: 100vh; }
+    aside { padding: 24px; background: #111827; color: #f9fafb; }
+    section { padding: 32px; max-width: 960px; width: 100%; box-sizing: border-box; }
+    h1, h2, h3 { margin-top: 0; }
+    aside h1 { font-size: 20px; }
+    form { margin-bottom: 24px; }
+    input, textarea, button { font: inherit; }
+    input[type=file], textarea { width: 100%; box-sizing: border-box; padding: 10px; border-radius: 8px; border: 1px solid #d1d5db; background: white; }
+    textarea { min-height: 110px; resize: vertical; }
+    button { padding: 10px 16px; border: 0; border-radius: 8px; color: white; background: #2563eb; cursor: pointer; }
+    .upload button { margin-top: 10px; width: 100%; }
+    .contract { display: block; padding: 12px; margin: 8px 0; color: #e5e7eb; text-decoration: none; border-radius: 8px; background: #1f2937; }
+    .contract.selected { background: #374151; outline: 1px solid #60a5fa; }
+    .contract small { display: block; margin-top: 4px; color: #9ca3af; }
+    .chat-card, .answer-card, .debug-card { padding: 20px; margin-bottom: 20px; border-radius: 12px; background: white; box-shadow: 0 2px 10px rgba(15, 23, 42, .06); }
+    .status { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 12px; background: #e5e7eb; color: #374151; }
+    .error { padding: 12px; margin-bottom: 16px; border-radius: 8px; background: #fee2e2; color: #991b1b; }
+    .answer { white-space: pre-wrap; line-height: 1.7; }
+    .evidence { padding: 12px 0; border-top: 1px solid #e5e7eb; }
+    .evidence:first-child { border-top: 0; }
+    .meta { color: #6b7280; font-size: 13px; }
+    pre { overflow-x: auto; padding: 12px; border-radius: 8px; background: #111827; color: #e5e7eb; }
+    @media (max-width: 760px) { main { grid-template-columns: 1fr; } aside { min-height: auto; } }
+  </style>
+</head>
+<body>
+<main>
+  <aside>
+    <h1>合同风险审阅</h1>
+    <form class="upload" action="/upload" method="post" enctype="multipart/form-data">
+      <label for="file">上传合同 PDF</label>
+      <input id="file" name="file" type="file" accept="application/pdf,.pdf" required>
+      <button type="submit">开始入库</button>
+    </form>
+
+    <h2>合同列表</h2>
+    {% if contracts %}
+      {% for contract in contracts %}
+        <a class="contract{% if selected_contract and selected_contract.contract_id == contract.contract_id %} selected{% endif %}"
+           href="/?contract_id={{ contract.contract_id }}">
+          {{ contract.filename }}
+          <small><span class="status">{{ contract.status }}</span></small>
+          {% if contract.error_message %}<small>{{ contract.error_message }}</small>{% endif %}
+        </a>
+      {% endfor %}
+    {% else %}
+      <p>还没有上传合同。</p>
+    {% endif %}
+  </aside>
+
+  <section>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    {% if selected_contract %}
+      <div class="chat-card">
+        <h2>{{ selected_contract.filename }}</h2>
+        <p class="meta">状态：{{ selected_contract.status }}</p>
+        <form action="/chat" method="post">
+          <input type="hidden" name="contract_id" value="{{ selected_contract.contract_id }}">
+          <label for="question">问题</label>
+          <textarea id="question" name="question" placeholder="例如：合同的付款方式是什么？" required>{{ question or "" }}</textarea>
+          <label><input type="checkbox" name="debug" value="true"{% if debug %} checked{% endif %}> 显示 RAG 调试信息</label>
+          <button type="submit">提问</button>
+        </form>
+      </div>
+
+      {% if answer_result %}
+        <div class="answer-card">
+          <h2>答案</h2>
+          <div class="answer">{{ answer_result.answer }}</div>
+          <h3>Selected Evidence</h3>
+          {% for item in answer_result.evidence %}
+            <div class="evidence">
+              <div class="meta">source_object_index={{ item.source_object_index }}{% if item.page_idx is defined %} · page={{ item.page_idx }}{% endif %}</div>
+              <div>{{ item.text }}</div>
+            </div>
+          {% else %}
+            <p class="meta">没有筛选出证据。</p>
+          {% endfor %}
+        </div>
+
+        {% if answer_result.debug %}
+          <div class="debug-card">
+            <h2>RAG Debug</h2>
+            <h3>Rerank Top10</h3>
+            {% for item in answer_result.debug.rerank_top10 %}
+              <div class="evidence">
+                <div class="meta">source_object_index={{ item.source_object_index }} · score={{ item.score }}</div>
+                <div>{{ item.text }}</div>
+              </div>
+            {% endfor %}
+            <h3>Selected Evidence</h3>
+            {% for item in answer_result.debug.selected_evidence %}
+              <div class="evidence">{{ item.text }}</div>
+            {% endfor %}
+            <h3>Final Answer</h3>
+            <div class="answer">{{ answer_result.debug.final_answer }}</div>
+          </div>
+        {% endif %}
+      {% endif %}
+    {% else %}
+      <div class="chat-card"><h2>请选择一份合同</h2><p>上传合同后，等待状态变为 ready，再开始提问。</p></div>
+    {% endif %}
+  </section>
+</main>
+</body>
+</html>
