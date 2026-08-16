@@ -76,8 +76,13 @@ class ContractRepository:
             updated_at=row["updated_at"],
         )
 
-    def create(self, filename: str, storage_dir: Path) -> ContractRecord:
-        contract_id = str(uuid.uuid4())
+    def create(
+        self,
+        filename: str,
+        storage_dir: Path,
+        contract_id: str | None = None,
+    ) -> ContractRecord:
+        contract_id = contract_id or str(uuid.uuid4())
         timestamp = self._now()
         with self._write_lock, self._connection() as connection:
             connection.execute(
