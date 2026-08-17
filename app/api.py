@@ -70,6 +70,7 @@ def create_app(
 ) -> FastAPI:
     settings = settings or load_settings()
     active_service = service or build_default_service(settings)
+    active_service.evaluation_service.recover_interrupted_runs()
     application = FastAPI(title="Contract Risk Review")
     templates = Jinja2Templates(
         directory=str(Path(__file__).resolve().parent / "templates")

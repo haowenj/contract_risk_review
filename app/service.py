@@ -5,9 +5,12 @@ from typing import Any
 
 from app.config import Settings
 from app.db import ContractRepository
+from app.evaluation_db import EvaluationRepository
+from app.evaluation_service import EvaluationService
 from app.index_manager import IndexManager
 from app.models import ContractRecord
 from app.qa import answer_question
+from app.rag_pipeline import RAGPipeline
 
 
 class ContractNotFoundError(LookupError):
@@ -27,11 +30,21 @@ class ContractService:
         settings: Settings,
         processor: Any,
         index_manager: IndexManager,
+        *,
+        rag_pipeline: RAGPipeline | None = None,
+        evaluation_service: EvaluationService | Any | None = None,
     ):
         self.repository = repository
         self.settings = settings
         self.processor = processor
         self.index_manager = index_manager
+        self.rag_pipeline = rag_pipeline or RAGPipeline()
+        self.evaluation_service = evaluation_service or EvaluationService(
+            repository,
+            EvaluationRepository(settings.database_path),
+            index_manager,
+            self.rag_pipeline,
+        )
 
     def create_upload(self, filename: str, content: bytes) -> ContractRecord:
         if not filename or Path(filename).suffix.lower() != ".pdf":
@@ -62,9 +75,41 @@ class ContractService:
             raise ContractNotReadyError(contract)
 
         index = self.index_manager.get(contract)
-        result = answer_question(index, question, debug=debug)
+        result = answer_question(
+            index,
+            question,
+            debug=debug,
+            pipeline=self.rag_pipeline,
+        )
         return {
             "contract_id": contract_id,
             "question": question,
             **result,
         }
+
+    def recover_interrupted_evaluation_runs(self) -> int:
+        return self.evaluation_service.recover_interrupted_runs()
+
+    def list_evaluation_cases(self, contract_id: str):
+        return self.evaluation_service.list_cases(contract_id)
+
+    def default_evaluation_cases(self):
+        return self.evaluation_service.default_cases()
+
+    def save_evaluation_cases(self, contract_id: str, entries):
+        return self.evaluation_service.save_cases(contract_id, entries)
+
+    def create_single_evaluation_run(self, contract_id: str, case_id: int):
+        return self.evaluation_service.create_single_run(contract_id, case_id)
+
+    def create_all_evaluation_run(self, contract_id: str):
+        return self.evaluation_service.create_all_run(contract_id)
+
+    def execute_evaluation_run(self, run_id: str):
+        return self.evaluation_service.execute_run(run_id)
+
+    def get_evaluation_run_payload(self, run_id: str):
+        return self.evaluation_service.get_run_payload(run_id)
+
+    def latest_evaluation_run_payload(self, contract_id: str):
+        return self.evaluation_service.latest_run_payload(contract_id)
