@@ -51,3 +51,61 @@ class ContractRepositoryTest(TestCase):
 
             with self.assertRaises(KeyError):
                 repository.update_status("missing", "failed", "error")
+
+    def test_ready_contract_persists_index_version(self):
+        with TemporaryDirectory() as temp_dir:
+            repository = ContractRepository(Path(temp_dir) / "contracts.db")
+            contract = repository.create("contract.pdf", Path(temp_dir) / "contract")
+
+            ready = repository.update_status(
+                contract.contract_id,
+                "ready",
+                index_version="index-v2",
+            )
+
+            loaded = repository.get(contract.contract_id)
+
+        self.assertEqual(ready.index_version, "index-v2")
+        self.assertEqual(loaded.index_version, "index-v2")
+        self.assertEqual(loaded.to_dict()["index_version"], "index-v2")
+
+    def test_existing_contract_table_is_migrated_with_index_version(self):
+        with TemporaryDirectory() as temp_dir:
+            database_path = Path(temp_dir) / "contracts.db"
+            connection = sqlite3.connect(database_path)
+            connection.execute(
+                """
+                CREATE TABLE contracts (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    contract_id TEXT NOT NULL UNIQUE,
+                    filename TEXT NOT NULL,
+                    storage_dir TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    error_message TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO contracts (
+                    contract_id, filename, storage_dir, status,
+                    error_message, created_at, updated_at
+                ) VALUES ('legacy-id', 'legacy.pdf', '/tmp/legacy', 'ready', NULL, 'now', 'now')
+                """
+            )
+            connection.commit()
+            connection.close()
+
+            repository = ContractRepository(database_path)
+            columns = {
+                row[1]
+                for row in sqlite3.connect(database_path).execute(
+                    "PRAGMA table_info(contracts)"
+                )
+            }
+            loaded = repository.get("legacy-id")
+
+        self.assertIn("index_version", columns)
+        self.assertIsNone(loaded.index_version)

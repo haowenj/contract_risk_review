@@ -35,3 +35,25 @@ class IndexManagerTest(TestCase):
 
         storage.assert_called_once_with(persist_dir=str(index_dir))
         loader.assert_called_once_with(storage.return_value, embed_model=embedding_model)
+
+    def test_cache_does_not_reuse_an_index_from_another_contract_version(self):
+        with TemporaryDirectory() as temp_dir:
+            index_dir = Path(temp_dir) / "index"
+            index_dir.mkdir()
+            manager = IndexManager(embedding_model=object())
+            first = object()
+            second = object()
+            manager.put("c1", first, index_version="v1")
+            contract = SimpleNamespace(
+                contract_id="c1",
+                index_version="v2",
+                storage_dir=temp_dir,
+            )
+
+            with patch("app.index_manager.StorageContext.from_defaults"), patch(
+                "app.index_manager.load_index_from_storage",
+                return_value=second,
+            ):
+                loaded = manager.get(contract)
+
+        self.assertIs(loaded, second)

@@ -12,12 +12,16 @@ from app.models import ContractRecord
 class IndexManager:
     def __init__(self, embedding_model: Any):
         self.embedding_model = embedding_model
-        self._cache: dict[str, Any] = {}
+        self._cache: dict[tuple[str, str | None], Any] = {}
         self._lock = threading.RLock()
 
     def get(self, contract: ContractRecord) -> Any:
         with self._lock:
-            cached = self._cache.get(contract.contract_id)
+            cache_key = (
+                contract.contract_id,
+                getattr(contract, "index_version", None),
+            )
+            cached = self._cache.get(cache_key)
             if cached is not None:
                 return cached
 
@@ -34,16 +38,25 @@ class IndexManager:
                 storage_context,
                 embed_model=self.embedding_model,
             )
-            self._cache[contract.contract_id] = index
+            self._cache[cache_key] = index
             return index
 
-    def put(self, contract_id: str, index: Any) -> None:
+    def put(
+        self,
+        contract_id: str,
+        index: Any,
+        *,
+        index_version: str | None = None,
+    ) -> None:
         with self._lock:
-            self._cache[contract_id] = index
+            self._cache[(contract_id, index_version)] = index
 
     def clear(self, contract_id: str | None = None) -> None:
         with self._lock:
             if contract_id is None:
                 self._cache.clear()
             else:
-                self._cache.pop(contract_id, None)
+                for cache_key in [
+                    key for key in self._cache if key[0] == contract_id
+                ]:
+                    self._cache.pop(cache_key, None)

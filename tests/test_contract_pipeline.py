@@ -68,6 +68,7 @@ class ContractProcessorTest(TestCase):
             call_order,
             ["parse", "clean", "merge", "context", "save_context", "nodes", "index", "persist", "cache"],
         )
+        self.assertIsNotNone(result.index_version)
         persist.assert_called_once()
 
     def test_failure_marks_failed_and_does_not_mark_ready(self):

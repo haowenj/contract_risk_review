@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -70,6 +71,7 @@ class ContractProcessor:
             raise KeyError(contract_id)
 
         self.repository.update_status(contract_id, "processing")
+        self.index_manager.clear(contract_id)
         try:
             paths = self._paths(contract)
             run_parse(
@@ -97,8 +99,17 @@ class ContractProcessor:
             index = VectorStoreIndex(nodes, embed_model=model)
             paths["index"].mkdir(parents=True, exist_ok=True)
             index.storage_context.persist(persist_dir=str(paths["index"]))
-            self.index_manager.put(contract_id, index)
-            return self.repository.update_status(contract_id, "ready")
+            index_version = str(uuid.uuid4())
+            self.index_manager.put(
+                contract_id,
+                index,
+                index_version=index_version,
+            )
+            return self.repository.update_status(
+                contract_id,
+                "ready",
+                index_version=index_version,
+            )
         except Exception as exc:
             logger.exception("contract ingestion failed: %s", contract_id)
             return self.repository.update_status(contract_id, "failed", str(exc))
