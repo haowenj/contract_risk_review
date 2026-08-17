@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import retrieval_evaluation
+from app.rag_pipeline import RAGPipeline
 
 
 def _serialize_result(result: Any) -> dict[str, Any]:
@@ -42,20 +43,18 @@ def answer_question(
     reranker: Any | None = None,
     selector_llm: Any | None = None,
     answer_llm: Any | None = None,
+    pipeline: RAGPipeline | None = None,
 ) -> dict[str, Any]:
     if not question.strip():
         raise ValueError("question must not be empty")
 
-    evaluations = retrieval_evaluation.run_evaluation(
+    evaluation = (pipeline or RAGPipeline()).run(
         index,
-        [{"query": question, "expected_source_object_indices": []}],
+        question,
         reranker=reranker,
-    )
-    evaluation = retrieval_evaluation.generate_summaries(
-        evaluations,
         selector_llm=selector_llm,
         answer_llm=answer_llm,
-    )[0]
+    )
     answer = evaluation["llm_summary"]["answer"]
     evidence = [
         _serialize_result(result)

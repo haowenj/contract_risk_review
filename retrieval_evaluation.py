@@ -301,7 +301,7 @@ def select_evidence(
         return _fallback_selected_indices(reranked_nodes)
 
 
-def _filter_nodes_by_indices(
+def filter_nodes_by_indices(
     reranked_nodes: list[Any],
     selected_indices: list[int],
 ) -> list[Any]:
@@ -357,7 +357,7 @@ def generate_summaries(
             reranked_nodes,
             llm=active_selector_llm,
         )
-        selected_nodes = _filter_nodes_by_indices(
+        selected_nodes = filter_nodes_by_indices(
             reranked_nodes,
             selected_indices,
         )
@@ -487,6 +487,23 @@ def _rank_by_source_object_index(results: list[Any]) -> dict[Any, int]:
         source_index = _source_object_index(result)
         ranks.setdefault(source_index, rank)
     return ranks
+
+
+def retrieve_and_rerank(
+    index: Any,
+    query: str,
+    *,
+    reranker: Any | None = None,
+) -> tuple[list[Any], list[Any]]:
+    """Retrieve vector candidates and rerank them without evaluation semantics."""
+    retriever = index.as_retriever(similarity_top_k=TOP_K)
+    vector_results = list(retriever.retrieve(query))[:TOP_K]
+    _record_vector_scores(vector_results)
+    active_reranker = build_reranker() if reranker is None else reranker
+    reranked_results = list(
+        active_reranker.postprocess_nodes(vector_results, query_str=query)
+    )[:RERANK_TOP_N]
+    return vector_results, reranked_results
 
 
 def recall_at_k(
