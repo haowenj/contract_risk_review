@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ selected_contract.filename }} · Evaluation</title>
+  <style>
+    :root {
+      color: #172033;
+      background: #eef3f8;
+      font: 15px/1.5 "Avenir Next", "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    button, .button {
+      border: 1px solid #c5d2e1;
+      border-radius: 8px;
+      background: white;
+      color: #172033;
+      padding: 8px 13px;
+      font: inherit;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    button:disabled { cursor: not-allowed; opacity: .55; }
+    button.primary, .button.primary {
+      border-color: #172033;
+      background: #172033;
+      color: white;
+    }
+    button:focus-visible, .button:focus-visible, textarea:focus-visible,
+    input:focus-visible { outline: 3px solid #93c5fd; outline-offset: 2px; }
+    .topbar {
+      min-height: 64px;
+      padding: 0 30px;
+      background: linear-gradient(90deg, #172033 0%, #25344f 100%);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+    .topbar strong { font-size: 18px; }
+    .topbar a { color: #d8e4f1; text-decoration: none; }
+    .shell { width: min(1180px, calc(100% - 40px)); margin: 30px auto 64px; }
+    .breadcrumb { margin-bottom: 15px; color: #5f7087; }
+    .breadcrumb a { color: #315b8c; text-decoration: none; }
+    .card {
+      padding: 22px;
+      border: 1px solid #d9e2ec;
+      border-radius: 14px;
+      background: white;
+      box-shadow: 0 8px 24px #1020380a;
+    }
+    .card + .card { margin-top: 18px; }
+    h1 { margin: 0; font-size: 23px; }
+    h2 { margin: 0 0 10px; font-size: 18px; }
+    h3 { margin: 18px 0 8px; font-size: 16px; }
+    .meta { margin: 5px 0 20px; color: #5f7087; }
+    .error {
+      margin-bottom: 16px;
+      padding: 12px 14px;
+      border: 1px solid #fecaca;
+      border-radius: 9px;
+      background: #fff7f7;
+      color: #b91c1c;
+    }
+    .hint { color: #5f7087; }
+    .case-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 220px auto auto;
+      gap: 10px;
+      align-items: start;
+      padding: 13px 0;
+      border-top: 1px solid #e2e8f0;
+    }
+    .case-row:first-child { border-top: 0; }
+    textarea, input[type="text"] {
+      width: 100%;
+      border: 1px solid #c5d2e1;
+      border-radius: 8px;
+      padding: 9px 10px;
+      font: inherit;
+    }
+    textarea { min-height: 72px; resize: vertical; }
+    .case-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 15px; }
+    .stale { grid-column: 1 / -1; color: #b45309; font-size: 13px; }
+    .run-status {
+      margin-bottom: 15px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: #f5f8fb;
+      color: #5f7087;
+    }
+    .result-card {
+      margin-top: 14px;
+      padding: 17px;
+      border: 1px solid #d9e2ec;
+      border-radius: 12px;
+      background: #fbfdff;
+    }
+    .result-card h3 { margin-top: 0; }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(130px, 1fr));
+      gap: 8px;
+      margin: 12px 0;
+    }
+    .metric {
+      padding: 10px;
+      border-radius: 8px;
+      background: #eef4fa;
+    }
+    .metric small { display: block; color: #5f7087; }
+    .metric strong { font-size: 18px; }
+    .ids {
+      padding: 9px 10px;
+      border-radius: 8px;
+      background: #f5f8fb;
+      overflow-wrap: anywhere;
+    }
+    details {
+      margin-top: 10px;
+      padding: 9px 10px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      background: white;
+    }
+    summary { cursor: pointer; font-weight: 650; }
+    .node {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid #e2e8f0;
+      white-space: pre-wrap;
+    }
+    .node small { display: block; margin-bottom: 4px; color: #5f7087; }
+    .answer {
+      padding: 13px;
+      border-radius: 8px;
+      background: #f5f8fb;
+      line-height: 1.8;
+    }
+    .answer > :first-child { margin-top: 0; }
+    .answer > :last-child { margin-bottom: 0; }
+    .answer p { margin: 0 0 10px; }
+    .answer ul, .answer ol { margin: 8px 0 10px; padding-left: 1.5em; }
+    .empty { padding: 28px; text-align: center; color: #5f7087; }
+    @media (max-width: 850px) {
+      .topbar { padding: 0 18px; }
+      .shell { width: calc(100% - 24px); margin-top: 22px; }
+      .case-row { grid-template-columns: 1fr; }
+      .metrics { grid-template-columns: repeat(2, minmax(130px, 1fr)); }
+    }
+  </style>
+</head>
+<body data-run-id="{{ run_id or '' }}">
+  <header class="topbar">
+    <strong>合同风险审阅 · Evaluation</strong>
+    <a href="/">← 返回合同任务</a>
+  </header>
+
+  <main class="shell">
+    <div class="breadcrumb">
+      <a href="/">合同任务</a> / {{ selected_contract.filename }} / Evaluation
+    </div>
+
+    <section class="card">
+      <h1>{{ selected_contract.filename }}</h1>
+      <p class="meta">
+        状态：{{ selected_contract.status }}
+        {% if selected_contract.index_version %} · index version={{ selected_contract.index_version }}{% endif %}
+      </p>
+
+      {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+
+      {% if selected_contract.status == "ready" %}
+        <h2>评测集配置</h2>
+        <p class="hint">正确 Node ID 使用 source_object_index 数字，可用逗号、空格或换行分隔。首次进入会预填脚本中的默认问题，保存后才能运行。</p>
+        <form id="cases-form" action="/contracts/{{ selected_contract.contract_id }}/evaluation/config" method="post">
+          <div id="case-list">
+            {% for row in evaluation_rows %}
+              <div class="case-row" data-case-id="{{ row.case_id or '' }}">
+                <textarea name="question" placeholder="输入评测问题">{{ row.question }}</textarea>
+                <input type="text" name="expected_source_object_indices" value="{{ row.expected_text }}" placeholder="例如：111, 112">
+                <div class="case-actions">
+                  {% if row.case_id and not row.stale %}
+                    <button type="submit" formaction="/contracts/{{ selected_contract.contract_id }}/evaluation/cases/{{ row.case_id }}/run" formmethod="post">测试本题</button>
+                  {% else %}
+                    <button type="button" disabled>先保存</button>
+                  {% endif %}
+                  <button type="button" class="remove-case">删除</button>
+                </div>
+                {% if row.stale %}<div class="stale">该问题绑定的是旧 index version，请重新保存/重新标注后再测试。</div>{% endif %}
+              </div>
+            {% else %}
+              <div class="case-row" data-case-id="">
+                <textarea name="question" placeholder="输入评测问题"></textarea>
+                <input type="text" name="expected_source_object_indices" placeholder="例如：111, 112">
+                <div class="case-actions"><button type="button" disabled>先保存</button><button type="button" class="remove-case">删除</button></div>
+              </div>
+            {% endfor %}
+          </div>
+          <div class="toolbar">
+            <button id="add-case" type="button">新增问题</button>
+            <button class="primary" type="submit">保存评测集</button>
+          </div>
+        </form>
+        <form class="toolbar" action="/contracts/{{ selected_contract.contract_id }}/evaluation/run-all" method="post">
+          <button class="primary" type="submit" {% if not evaluation_rows or evaluation_rows|selectattr('case_id')|list|length != evaluation_rows|length %}disabled{% endif %}>测试全部问题</button>
+        </form>
+      {% else %}
+        <div class="run-status">当前合同还没有完成入库，不能运行 Evaluation。</div>
+      {% endif %}
+    </section>
+
+    <section class="card" id="results">
+      <h2>测试结果</h2>
+      {% if latest_run %}
+        <div class="run-status">Run {{ latest_run.run_id }} · 状态：<strong>{{ latest_run.status }}</strong>{% if latest_run.error_message %} · {{ latest_run.error_message }}{% endif %}</div>
+        {% for item in latest_run.items %}
+          {% set result = item.result %}
+          <article class="result-card">
+            <h3>{{ loop.index }}. {{ item.question }}</h3>
+            <div class="ids"><strong>正确 Node ID：</strong>{{ item.expected_source_object_indices|join(', ') if item.expected_source_object_indices else '未配置' }}</div>
+            <div class="ids"><strong>Vector Top10 实际 Node ID：</strong>{{ result.vector_source_object_indices|join(', ') }}</div>
+            <div class="ids"><strong>Rerank Top10 实际 Node ID：</strong>{{ result.rerank_source_object_indices|join(', ') }}</div>
+            <div class="metrics">
+              <div class="metric"><small>Vector Recall@5</small><strong>{{ result.vector_recall_at_5 if result.vector_recall_at_5 is not none else '—' }}</strong></div>
+              <div class="metric"><small>Vector Recall@10</small><strong>{{ result.vector_recall_at_10 if result.vector_recall_at_10 is not none else '—' }}</strong></div>
+              <div class="metric"><small>Rerank Recall@5</small><strong>{{ result.rerank_recall_at_5 if result.rerank_recall_at_5 is not none else '—' }}</strong></div>
+              <div class="metric"><small>Rerank Recall@10</small><strong>{{ result.rerank_recall_at_10 if result.rerank_recall_at_10 is not none else '—' }}</strong></div>
+            </div>
+            <details>
+              <summary>Vector Top10 候选</summary>
+              {% for node in result.vector_results %}
+                <div class="node"><small>Node {{ node.source_object_index }} · score={{ node.score if node.score is defined else '—' }}{% if node.page_idx is defined %} · page={{ node.page_idx }}{% endif %}</small>{{ node.text }}</div>
+              {% else %}<p class="hint">没有 Vector 候选。</p>{% endfor %}
+            </details>
+            <details>
+              <summary>Rerank Top10 候选</summary>
+              {% for node in result.reranked_results %}
+                <div class="node"><small>Node {{ node.source_object_index }} · score={{ node.score if node.score is defined else '—' }}{% if node.page_idx is defined %} · page={{ node.page_idx }}{% endif %}</small>{{ node.text }}</div>
+              {% else %}<p class="hint">没有 Rerank 候选。</p>{% endfor %}
+            </details>
+            <details open>
+              <summary>Selected Evidence</summary>
+              {% for node in result.selected_nodes %}
+                <div class="node"><small>Node {{ node.source_object_index }}{% if node.page_idx is defined %} · page={{ node.page_idx }}{% endif %}</small>{{ node.text }}</div>
+              {% else %}<p class="hint">没有筛选出证据。</p>{% endfor %}
+            </details>
+            <h3>最终回答</h3>
+            <div class="answer">{{ result.llm_summary.answer|markdown }}</div>
+          </article>
+        {% else %}
+          <div class="empty">这次运行还没有保存题目结果。</div>
+        {% endfor %}
+      {% else %}
+        <div class="empty">还没有测试结果，先保存评测集并测试单题或全部问题。</div>
+      {% endif %}
+    </section>
+  </main>
+
+  <template id="case-template">
+    <div class="case-row" data-case-id="">
+      <textarea name="question" placeholder="输入评测问题"></textarea>
+      <input type="text" name="expected_source_object_indices" placeholder="例如：111, 112">
+      <div class="case-actions"><button type="button" disabled>先保存</button><button type="button" class="remove-case">删除</button></div>
+    </div>
+  </template>
+
+  <script>
+    const caseList = document.querySelector('#case-list');
+    const caseTemplate = document.querySelector('#case-template');
+    const addCaseButton = document.querySelector('#add-case');
+    const runId = document.body.dataset.runId;
+
+    function addCaseRow() {
+      caseList.append(caseTemplate.content.cloneNode(true));
+    }
+
+    function removeCaseRow(button) {
+      const rows = caseList.querySelectorAll('.case-row');
+      if (rows.length === 1) {
+        rows[0].querySelector('textarea').value = '';
+        rows[0].querySelector('input').value = '';
+        return;
+      }
+      button.closest('.case-row').remove();
+    }
+
+    addCaseButton?.addEventListener('click', addCaseRow);
+    caseList?.addEventListener('click', (event) => {
+      const button = event.target.closest('.remove-case');
+      if (button) removeCaseRow(button);
+    });
+
+    async function pollRun() {
+      if (!runId) return;
+      const response = await fetch(`/api/contracts/{{ selected_contract.contract_id }}/evaluation/runs/${encodeURIComponent(runId)}`, { cache: 'no-store' });
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (payload.status === 'queued' || payload.status === 'processing') {
+        window.setTimeout(pollRun, 2000);
+        return;
+      }
+      window.location.reload();
+    }
+    if (runId && document.querySelector('.run-status strong')?.textContent.trim() !== 'ready' && document.querySelector('.run-status strong')?.textContent.trim() !== 'failed') {
+      pollRun();
+    }
+  </script>
+</body>
+</html>

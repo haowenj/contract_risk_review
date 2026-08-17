@@ -278,6 +278,7 @@
           <div class="task-actions">
             {% if contract.status == "ready" %}
               <a class="button primary" href="/contracts/{{ contract.contract_id }}">开始问答</a>
+              <a class="button" href="/contracts/{{ contract.contract_id }}/evaluation">Evaluation</a>
             {% elif contract.status == "failed" %}
               <button type="button" data-error-message="{{ contract.error_message or '入库失败，请查看服务日志。' }}">错误详情</button>
             {% else %}
@@ -357,6 +358,11 @@
         link.href = `/contracts/${encodeURIComponent(contract.contract_id)}`;
         link.textContent = '开始问答';
         actions.append(link);
+        const evaluationLink = document.createElement('a');
+        evaluationLink.className = 'button';
+        evaluationLink.href = `/contracts/${encodeURIComponent(contract.contract_id)}/evaluation`;
+        evaluationLink.textContent = 'Evaluation';
+        actions.append(evaluationLink);
       } else if (contract.status === 'failed') {
         actions.append(createButton(
           '错误详情',

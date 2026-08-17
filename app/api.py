@@ -19,6 +19,13 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.config import Settings, load_settings
 from app.db import ContractRepository
+from app.evaluation_forms import format_expected_indices, parse_expected_indices
+from app.evaluation_service import (
+    EvaluationCaseNotFoundError,
+    EvaluationContractNotFoundError,
+    EvaluationContractNotReadyError,
+    EvaluationStaleError,
+)
 from app.index_manager import IndexManager
 from app.markdown import render_markdown
 from app.pipeline import ContractProcessor
@@ -169,6 +176,108 @@ def create_app(
                 error="提问失败，请稍后重试。",
             )
 
+    def evaluation_rows(
+        cases: list[Any],
+        *,
+        contract_index_version: str | None,
+    ) -> list[dict[str, Any]]:
+        rows = []
+        for case in cases:
+            index_version = getattr(case, "index_version", None)
+            rows.append(
+                {
+                    "case_id": getattr(case, "case_id", None),
+                    "question": getattr(case, "question", ""),
+                    "expected_text": format_expected_indices(
+                        list(
+                            getattr(
+                                case,
+                                "expected_source_object_indices",
+                                [],
+                            )
+                        )
+                    ),
+                    "stale": bool(
+                        contract_index_version
+                        and index_version
+                        and index_version != contract_index_version
+                    ),
+                }
+            )
+        return rows
+
+    def render_evaluation_page(
+        request: Request,
+        contract_id: str,
+        *,
+        run_id: str | None = None,
+        error: str | None = None,
+        submitted_rows: list[dict[str, Any]] | None = None,
+    ) -> HTMLResponse:
+        selected_contract = active_service.get_contract(contract_id)
+        if selected_contract is None:
+            raise HTTPException(status_code=404, detail="contract not found")
+
+        saved_cases: list[Any] = []
+        default_cases: list[tuple[str, list[int]]] = []
+        if selected_contract.status == "ready":
+            saved_cases = active_service.list_evaluation_cases(contract_id)
+            if not saved_cases:
+                default_cases = active_service.default_evaluation_cases()
+
+        if submitted_rows is not None:
+            rows = submitted_rows
+        elif saved_cases:
+            rows = evaluation_rows(
+                saved_cases,
+                contract_index_version=selected_contract.index_version,
+            )
+        else:
+            rows = [
+                {
+                    "case_id": None,
+                    "question": question,
+                    "expected_text": format_expected_indices(expected),
+                    "stale": False,
+                }
+                for question, expected in default_cases
+            ]
+
+        latest_run = None
+        if selected_contract.status == "ready":
+            try:
+                latest_run = (
+                    active_service.get_evaluation_run_payload(run_id)
+                    if run_id
+                    else active_service.latest_evaluation_run_payload(
+                        contract_id
+                    )
+                )
+            except KeyError as exc:
+                raise HTTPException(status_code=404, detail="run not found") from exc
+
+        if selected_contract.status != "ready" and error is None:
+            error = f"合同当前状态为 {selected_contract.status}，完成入库后才能进行评测。"
+
+        return templates.TemplateResponse(
+            request=request,
+            name="evaluation.html",
+            context={
+                "selected_contract": selected_contract,
+                "evaluation_rows": rows,
+                "latest_run": latest_run,
+                "run_id": run_id,
+                "error": error,
+            },
+        )
+
+    def evaluation_error_message(exc: Exception) -> str:
+        if isinstance(exc, EvaluationStaleError):
+            return str(exc)
+        if isinstance(exc, ValueError):
+            return str(exc)
+        return "评测操作失败，请稍后重试。"
+
     @application.post("/api/contracts", status_code=202)
     async def upload_contract(
         background_tasks: BackgroundTasks,
@@ -197,6 +306,18 @@ def create_app(
         if record is None:
             raise HTTPException(status_code=404, detail="contract not found")
         return _record_payload(record)
+
+    @application.get(
+        "/api/contracts/{contract_id}/evaluation/runs/{run_id}"
+    )
+    def get_evaluation_run(contract_id: str, run_id: str) -> dict[str, Any]:
+        try:
+            payload = active_service.get_evaluation_run_payload(run_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="evaluation run not found") from exc
+        if payload.get("contract_id") != contract_id:
+            raise HTTPException(status_code=404, detail="evaluation run not found")
+        return payload
 
     @application.post("/api/contracts/{contract_id}/chat")
     def chat(contract_id: str, request: ChatRequest) -> dict[str, Any]:
@@ -251,6 +372,132 @@ def create_app(
     @application.get("/contracts/{contract_id}", response_class=HTMLResponse)
     def contract_page(request: Request, contract_id: str) -> HTMLResponse:
         return render_chat_page(request, contract_id)
+
+    @application.get(
+        "/contracts/{contract_id}/evaluation",
+        response_class=HTMLResponse,
+    )
+    def evaluation_page(
+        request: Request,
+        contract_id: str,
+        run_id: str | None = None,
+    ) -> HTMLResponse:
+        return render_evaluation_page(request, contract_id, run_id=run_id)
+
+    @application.post(
+        "/contracts/{contract_id}/evaluation/config",
+        response_class=HTMLResponse,
+    )
+    def save_evaluation_config(
+        request: Request,
+        contract_id: str,
+        question: list[str] = Form(default=[]),
+        expected_source_object_indices: list[str] = Form(default=[]),
+    ) -> Response:
+        submitted_rows: list[dict[str, Any]] = []
+        try:
+            if len(question) != len(expected_source_object_indices):
+                raise ValueError("评测问题和正确 Node ID 行数不一致")
+
+            entries: list[tuple[str, list[int]]] = []
+            for current_question, raw_indices in zip(
+                question,
+                expected_source_object_indices,
+            ):
+                normalized_question = current_question.strip()
+                normalized_indices = parse_expected_indices(raw_indices)
+                if not normalized_question and not raw_indices.strip():
+                    continue
+                if not normalized_question:
+                    raise ValueError("问题不能为空")
+                submitted_rows.append(
+                    {
+                        "case_id": None,
+                        "question": normalized_question,
+                        "expected_text": format_expected_indices(normalized_indices),
+                        "stale": False,
+                    }
+                )
+                entries.append((normalized_question, normalized_indices))
+
+            active_service.save_evaluation_cases(contract_id, entries)
+            return RedirectResponse(
+                url=f"/contracts/{contract_id}/evaluation",
+                status_code=303,
+            )
+        except (
+            EvaluationContractNotFoundError,
+            EvaluationContractNotReadyError,
+            ValueError,
+            EvaluationStaleError,
+        ) as exc:
+            if not submitted_rows:
+                submitted_rows = [
+                    {
+                        "case_id": None,
+                        "question": current_question,
+                        "expected_text": raw_indices,
+                        "stale": False,
+                    }
+                    for current_question, raw_indices in zip(
+                        question,
+                        expected_source_object_indices,
+                    )
+                ]
+            return render_evaluation_page(
+                request,
+                contract_id,
+                error=evaluation_error_message(exc),
+                submitted_rows=submitted_rows,
+            )
+
+    @application.post(
+        "/contracts/{contract_id}/evaluation/cases/{case_id}/run",
+        response_class=HTMLResponse,
+    )
+    def run_single_evaluation(
+        contract_id: str,
+        case_id: int,
+        background_tasks: BackgroundTasks,
+    ) -> Response:
+        try:
+            run = active_service.create_single_evaluation_run(contract_id, case_id)
+        except (
+            EvaluationContractNotFoundError,
+            EvaluationCaseNotFoundError,
+        ) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except EvaluationContractNotReadyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except EvaluationStaleError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        background_tasks.add_task(active_service.execute_evaluation_run, run.run_id)
+        return RedirectResponse(
+            url=f"/contracts/{contract_id}/evaluation?run_id={run.run_id}",
+            status_code=303,
+        )
+
+    @application.post(
+        "/contracts/{contract_id}/evaluation/run-all",
+        response_class=HTMLResponse,
+    )
+    def run_all_evaluation(
+        contract_id: str,
+        background_tasks: BackgroundTasks,
+    ) -> Response:
+        try:
+            run = active_service.create_all_evaluation_run(contract_id)
+        except EvaluationContractNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except EvaluationContractNotReadyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (ValueError, EvaluationStaleError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        background_tasks.add_task(active_service.execute_evaluation_run, run.run_id)
+        return RedirectResponse(
+            url=f"/contracts/{contract_id}/evaluation?run_id={run.run_id}",
+            status_code=303,
+        )
 
     @application.post(
         "/contracts/{contract_id}/chat",
