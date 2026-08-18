@@ -17,6 +17,23 @@ def result_for(source_object_index: int, text: str, score: float = 0.9):
     return SimpleNamespace(node=node, score=score)
 
 
+def table_result_for(source_object_index: int, text: str, score: float = 0.9):
+    node = SimpleNamespace(
+        node_id=f"table-node-{source_object_index}",
+        text=text,
+        metadata={
+            "node_type": "table",
+            "source_object_index": source_object_index,
+            "page_idx": 2,
+            "bbox": [1, 2, 3, 4],
+            "table_body": "<table><tr><td>30%</td></tr></table>",
+            "table_caption": ["付款计划"],
+            "table_footnote": ["以到账为准"],
+        },
+    )
+    return SimpleNamespace(node=node, score=score)
+
+
 def test_evaluation_metrics_compare_gold_only_after_pipeline_runs():
     result = {
         "query": "问题",
@@ -76,3 +93,23 @@ def test_serialize_pipeline_result_keeps_node_and_score_metadata():
     assert serialized["vector_results"][0]["node_id"] == "node-7"
     assert serialized["reranked_results"][0]["score"] == 0.95
     assert serialized["selected_nodes"][0]["page_idx"] == 4
+
+
+def test_serialize_pipeline_result_keeps_original_table_information():
+    result = {
+        "query": "问题",
+        "vector_results": [table_result_for(7, "第1行：付款比例 | 30%")],
+        "reranked_results": [table_result_for(7, "第1行：付款比例 | 30%")],
+        "selected_indices": [7],
+        "selected_nodes": [table_result_for(7, "第1行：付款比例 | 30%")],
+        "llm_summary": {"answer": "答案", "evidence_indices": [7]},
+    }
+
+    serialized = serialize_pipeline_result(result)
+
+    evidence = serialized["selected_nodes"][0]
+    assert evidence["node_type"] == "table"
+    assert evidence["bbox"] == [1, 2, 3, 4]
+    assert evidence["table_body"].startswith("<table>")
+    assert evidence["table_caption"] == ["付款计划"]
+    assert evidence["table_footnote"] == ["以到账为准"]

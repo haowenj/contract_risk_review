@@ -27,6 +27,23 @@ def result_for(index: int, text: str, score: float):
     return SimpleNamespace(node=node, score=score)
 
 
+def table_result_for(index: int, text: str, score: float = 0.8):
+    node = SimpleNamespace(
+        node_id=f"table-node-{index}",
+        text=text,
+        metadata={
+            "node_type": "table",
+            "source_object_index": index,
+            "page_idx": 2,
+            "bbox": [1, 2, 3, 4],
+            "table_body": "<table><tr><td>30%</td></tr></table>",
+            "table_caption": ["付款计划"],
+            "table_footnote": ["以到账为准"],
+        },
+    )
+    return SimpleNamespace(node=node, score=score)
+
+
 class FakeRetriever:
     def __init__(self, results):
         self.results = results
@@ -86,3 +103,22 @@ class AppQATest(TestCase):
         self.assertEqual(result["answer"], "答案")
         self.assertEqual(result["debug"], None)
         self.assertEqual(result["evidence"][0]["text"], "证据")
+
+    def test_answer_question_serializes_table_original_information_in_evidence(self):
+        result = answer_question(
+            FakeIndex([table_result_for(7, "第1行：付款比例 | 30%")]),
+            "付款比例是多少？",
+            reranker=FakeReranker(),
+            selector_llm=FakeLLM({"evidence_indices": [7]}),
+            answer_llm=FakeLLM({"answer": "30%"}),
+        )
+
+        evidence = result["evidence"][0]
+        self.assertEqual(evidence["node_type"], "table")
+        self.assertEqual(
+            evidence["table_body"],
+            "<table><tr><td>30%</td></tr></table>",
+        )
+        self.assertEqual(evidence["table_caption"], ["付款计划"])
+        self.assertEqual(evidence["table_footnote"], ["以到账为准"])
+        self.assertEqual(evidence["bbox"], [1, 2, 3, 4])

@@ -108,6 +108,17 @@ def _serialize_result(result: Any) -> dict[str, Any]:
         if key in metadata and metadata[key] is not None:
             serialized[key] = metadata[key]
 
+    if metadata.get("node_type") == "table":
+        for key in (
+            "node_type",
+            "bbox",
+            "table_body",
+            "table_caption",
+            "table_footnote",
+        ):
+            if key in metadata and metadata[key] is not None:
+                serialized[key] = metadata[key]
+
     score = getattr(result, "score", None)
     if score is not None:
         serialized["score"] = score
