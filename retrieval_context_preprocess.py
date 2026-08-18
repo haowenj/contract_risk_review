@@ -15,9 +15,11 @@ from mineru_to_nodes import (
     INPUT_PATH,
     RETRIEVAL_CONTEXT_PATH,
 )
+from table_searchable_text import table_to_searchable_text
 
 MAX_RETRIEVAL_CONTEXT_CHARS = 160
 CONTEXT_LLM_CONCURRENCY = 5
+MAX_CONTEXT_GENERATION_ATTEMPTS = 3
 CONTEXT_LLM_MODEL = os.getenv("RETRIEVAL_CONTEXT_LLM_MODEL", "qwen3.7-plus")
 CONTEXT_LLM_TIMEOUT_SECONDS = int(
     os.getenv("RETRIEVAL_CONTEXT_LLM_TIMEOUT_SECONDS", "120")
@@ -37,6 +39,7 @@ context_llm = ChatOpenAI(
 )
 
 ContextGenerator = Callable[[str, list[str]], str | None]
+ContextPromptBuilder = Callable[[str, list[str]], str]
 
 
 def _text_objects(objects: list[dict]) -> list[tuple[int, dict]]:
@@ -46,6 +49,14 @@ def _text_objects(objects: list[dict]) -> list[tuple[int, dict]]:
         if obj.get("type") == "text"
         and isinstance(obj.get("text"), str)
         and obj["text"].strip()
+    ]
+
+
+def _table_objects(objects: list[dict]) -> list[tuple[int, dict]]:
+    return [
+        (source_index, obj)
+        for source_index, obj in enumerate(objects)
+        if obj.get("type") == "table"
     ]
 
 
@@ -74,6 +85,33 @@ def _build_section_paths(
     return section_paths
 
 
+def _section_path_before_index(
+    objects: list[dict],
+    target_index: int,
+) -> list[str]:
+    heading_stack: list[tuple[int, str]] = []
+
+    for obj in objects[:target_index]:
+        if obj.get("type") != "text":
+            continue
+        heading_text = obj.get("text")
+        if not isinstance(heading_text, str) or not heading_text.strip():
+            continue
+        text_level = obj.get("text_level")
+        if text_level is None:
+            continue
+        try:
+            level = int(text_level)
+        except (TypeError, ValueError):
+            level = len(heading_stack) + 1
+
+        while heading_stack and heading_stack[-1][0] >= level:
+            heading_stack.pop()
+        heading_stack.append((level, heading_text.strip()))
+
+    return [text for _, text in heading_stack]
+
+
 def build_context_prompt(chunk_text: str, section_path: list[str]) -> str:
     section_text = " > ".join(section_path) or "未识别到章节标题"
 
@@ -91,6 +129,27 @@ def build_context_prompt(chunk_text: str, section_path: list[str]) -> str:
 
 当前 chunk：
 {chunk_text.strip()}
+"""
+
+
+def build_table_context_prompt(
+    searchable_text: str,
+    section_path: list[str],
+) -> str:
+    section_text = " > ".join(section_path) or "未识别到章节标题"
+
+    return f"""你是合同检索预处理器。请为当前 table 生成一段简短的 retrieval_context。
+
+目标是补充表格在全文中的章节定位、表格主题或表格用途。
+只使用下方章节路径和当前表格明确提供的信息，不得猜测或补充表格没有出现的事实。
+如果没有可安全补充的信息，输出空字符串。
+只输出 retrieval_context，不要输出 Markdown、引号、前缀或解释。
+
+章节路径：
+{section_text}
+
+当前表格 searchable_text：
+{searchable_text.strip()}
 """
 
 
@@ -135,36 +194,51 @@ def _generate_one_context(
     source_object_index: int,
     llm: Any | None,
     context_generator: ContextGenerator | None,
+    prompt_builder: ContextPromptBuilder = build_context_prompt,
 ) -> str | None:
-    try:
-        if context_generator is not None:
-            context = context_generator(chunk_text, section_path)
-        else:
-            model = context_llm if llm is None else llm
-            response = model.invoke(build_context_prompt(chunk_text, section_path))
-            content = (
-                response
-                if isinstance(response, str)
-                else getattr(response, "content", None)
-            )
-            context = _message_content_to_text(content)
+    normalized_chunk = " ".join(chunk_text.split()).strip()
 
-        context = _normalize_context(context)
-        normalized_chunk = " ".join(chunk_text.split()).strip()
-        if context == normalized_chunk or (
-            len(normalized_chunk) >= 20
-            and normalized_chunk in (context or "")
-        ):
-            context = None
-    except Exception as exc:
-        logger.warning(
-            "retrieval_context generation failed for source_object_index=%s: %s",
-            source_object_index,
-            exc,
-        )
-        context = None
+    for attempt in range(1, MAX_CONTEXT_GENERATION_ATTEMPTS + 1):
+        try:
+            if context_generator is not None:
+                context = context_generator(chunk_text, section_path)
+            else:
+                model = context_llm if llm is None else llm
+                response = model.invoke(prompt_builder(chunk_text, section_path))
+                content = (
+                    response
+                    if isinstance(response, str)
+                    else getattr(response, "content", None)
+                )
+                context = _message_content_to_text(content)
 
-    return context or _fallback_context(section_path)
+            context = _normalize_context(context)
+            if context == normalized_chunk or (
+                len(normalized_chunk) >= 20
+                and normalized_chunk in (context or "")
+            ):
+                context = None
+            return context or _fallback_context(section_path)
+        except Exception as exc:
+            if attempt < MAX_CONTEXT_GENERATION_ATTEMPTS:
+                logger.warning(
+                    "retrieval_context generation failed for "
+                    "source_object_index=%s (attempt %s/%s), retrying: %s",
+                    source_object_index,
+                    attempt,
+                    MAX_CONTEXT_GENERATION_ATTEMPTS,
+                    exc,
+                )
+            else:
+                logger.warning(
+                    "retrieval_context generation failed for "
+                    "source_object_index=%s after %s attempts: %s",
+                    source_object_index,
+                    MAX_CONTEXT_GENERATION_ATTEMPTS,
+                    exc,
+                )
+
+    return _fallback_context(section_path)
 
 
 def generate_contexts(
@@ -176,27 +250,67 @@ def generate_contexts(
 ) -> dict[int, str | None]:
     text_objects = _text_objects(objects)
     section_paths = _build_section_paths(text_objects)
-    if not text_objects:
+    contexts: list[str | None] = []
+    if text_objects:
+        worker_count = min(max(1, concurrency), len(text_objects))
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = [
+                executor.submit(
+                    _generate_one_context,
+                    obj["text"],
+                    section_paths[text_index],
+                    source_object_index=source_index,
+                    llm=llm,
+                    context_generator=context_generator,
+                )
+                for text_index, (source_index, obj) in enumerate(text_objects)
+            ]
+            contexts = [future.result() for future in futures]
+
+    return {
+        **{
+            source_index: contexts[text_index]
+            for text_index, (source_index, _) in enumerate(text_objects)
+        },
+        **_generate_table_contexts(
+            objects,
+            llm=llm,
+            context_generator=context_generator,
+            concurrency=concurrency,
+        ),
+    }
+
+
+def _generate_table_contexts(
+    objects: list[dict],
+    *,
+    llm: Any | None,
+    context_generator: ContextGenerator | None,
+    concurrency: int,
+) -> dict[int, str | None]:
+    table_objects = _table_objects(objects)
+    if not table_objects:
         return {}
 
-    worker_count = min(max(1, concurrency), len(text_objects))
+    worker_count = min(max(1, concurrency), len(table_objects))
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
         futures = [
             executor.submit(
                 _generate_one_context,
-                obj["text"],
-                section_paths[text_index],
+                table_to_searchable_text(obj),
+                _section_path_before_index(objects, source_index),
                 source_object_index=source_index,
                 llm=llm,
                 context_generator=context_generator,
+                prompt_builder=build_table_context_prompt,
             )
-            for text_index, (source_index, obj) in enumerate(text_objects)
+            for source_index, obj in table_objects
         ]
         contexts = [future.result() for future in futures]
 
     return {
-        source_index: contexts[text_index]
-        for text_index, (source_index, _) in enumerate(text_objects)
+        source_index: contexts[table_index]
+        for table_index, (source_index, _) in enumerate(table_objects)
     }
 
 
