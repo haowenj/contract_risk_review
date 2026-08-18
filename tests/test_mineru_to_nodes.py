@@ -66,6 +66,43 @@ class MineruToNodesTest(TestCase):
         self.assertNotIn("bbox", embedding_text)
         self.assertNotIn("text_level", embedding_text)
 
+    def test_build_nodes_creates_one_table_node_with_raw_metadata_and_embedding_text(self):
+        objects = [
+            {
+                "type": "table",
+                "table_body": (
+                    "<table><tr><td>付款比例</td><td>30%</td></tr></table>"
+                ),
+                "table_caption": ["付款计划"],
+                "table_footnote": ["以到账为准"],
+                "page_idx": 2,
+                "bbox": [1, 2, 3, 4],
+            }
+        ]
+
+        node = mineru_to_nodes.build_nodes(
+            objects,
+            retrieval_contexts={0: "付款条款表格"},
+        )[0]
+
+        self.assertEqual(node.metadata["node_type"], "table")
+        self.assertEqual(node.metadata["source_object_index"], 0)
+        self.assertEqual(node.metadata["page_idx"], 2)
+        self.assertEqual(node.metadata["bbox"], [1, 2, 3, 4])
+        self.assertEqual(
+            node.metadata["table_body"],
+            objects[0]["table_body"],
+        )
+        self.assertEqual(node.metadata["table_caption"], ["付款计划"])
+        self.assertEqual(node.metadata["table_footnote"], ["以到账为准"])
+        self.assertIn("付款比例", node.text)
+        self.assertIn("30%", node.get_content(metadata_mode=MetadataMode.EMBED))
+        self.assertIn(
+            "付款条款表格",
+            node.get_content(metadata_mode=MetadataMode.EMBED),
+        )
+        self.assertNotIn("table_body", node.get_content(metadata_mode=MetadataMode.EMBED))
+
     def test_missing_persisted_context_does_not_trigger_llm_generation(self):
         objects = [{"type": "text", "text": "正文"}]
 

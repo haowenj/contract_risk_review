@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from llama_index.core import VectorStoreIndex
 from llama_index.core.schema import MetadataMode, TextNode
 from llama_index.embeddings.openai import OpenAIEmbedding
+from table_searchable_text import table_to_searchable_text
 
 PROJECT_DIR = Path(__file__).resolve().parent
 INPUT_PATH = Path(
@@ -124,6 +125,45 @@ def build_nodes(
             TextNode(
                 id_=f"test_hetong_{source_index}",
                 text=text,
+                metadata=metadata,
+                excluded_embed_metadata_keys=excluded_embed_metadata_keys,
+            )
+        )
+
+    for source_index, obj in enumerate(objects):
+        if obj.get("type") != "table":
+            continue
+
+        retrieval_context = (
+            retrieval_contexts.get(source_index)
+            if retrieval_contexts is not None
+            else None
+        )
+        metadata = {
+            "node_type": "table",
+            "retrieval_context": retrieval_context,
+            "source_object_index": source_index,
+            "page_idx": obj.get("page_idx"),
+            "bbox": obj.get("bbox"),
+            "table_body": obj.get("table_body"),
+            "table_caption": obj.get("table_caption"),
+            "table_footnote": obj.get("table_footnote"),
+        }
+        metadata = {
+            key: value
+            for key, value in metadata.items()
+            if value is not None
+        }
+        excluded_embed_metadata_keys = [
+            key
+            for key in metadata
+            if key != "retrieval_context"
+        ]
+
+        nodes.append(
+            TextNode(
+                id_=f"test_hetong_{source_index}",
+                text=table_to_searchable_text(obj),
                 metadata=metadata,
                 excluded_embed_metadata_keys=excluded_embed_metadata_keys,
             )
