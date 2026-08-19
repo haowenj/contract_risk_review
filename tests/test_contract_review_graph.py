@@ -104,9 +104,11 @@ class FakeLLM:
 
 
 class FakeContractService:
-    def __init__(self, *evidence_sets):
+    def __init__(self, *evidence_sets, source_objects=None):
         self.evidence_sets = list(evidence_sets)
+        self.source_objects = [] if source_objects is None else source_objects
         self.searches = []
+        self.content_loads = []
 
     def search_contract(self, contract_id, query, *, debug_callback=None):
         self.searches.append((contract_id, query))
@@ -116,6 +118,12 @@ class FakeContractService:
         if not evidence and debug_callback is not None:
             debug_callback(RERANK_TOP3_DEBUG)
         return evidence
+
+    def load_contract_content_objects(self, contract_id):
+        self.content_loads.append(contract_id)
+        if isinstance(self.source_objects, Exception):
+            raise self.source_objects
+        return self.source_objects
 
 
 def initial_state(**updates):
@@ -199,7 +207,7 @@ def test_route_after_retrieve_never_creates_a_third_rag_attempt():
     ) == "rewrite_query"
     assert route_after_retrieve(
         initial_state(retrieval_attempt=2, retrieved_evidence=[])
-    ) == "insufficient_result"
+    ) == "absence_check"
     assert route_after_retrieve(
         initial_state(
             retrieval_attempt=2,
@@ -351,6 +359,53 @@ def test_explicit_graph_stops_after_second_empty_retrieval_without_review_llm():
     assert result.evidence_status == "insufficient"
     assert result.evidence == []
     assert "合同没有约定" not in result.finding
+
+
+def test_graph_scans_after_two_empty_rag_results_and_reviews_absence_candidate():
+    events = []
+    contract_service = FakeContractService(
+        [],
+        [],
+        source_objects=[
+            {"type": "text", "text": "标题", "page_idx": 0},
+            {
+                "type": "text",
+                "text": "未经甲方书面同意，乙方不得委托第三方履行合同义务。",
+                "page_idx": 4,
+            },
+        ],
+    )
+    review_llm = FakeLLM(RISK_DECISION)
+    nodes = ContractReviewNodes(
+        parse_llm=FakeLLM(ONE_ITEM_PAYLOAD),
+        query_rewrite_llm=FakeLLM(
+            {
+                **QUERY_REWRITE,
+                "keywords": ["分包", "转包", "委托第三方"],
+            }
+        ),
+        review_llm=review_llm,
+        contract_service=contract_service,
+        progress_callback=lambda event, payload: events.append((event, payload)),
+    )
+
+    final_state = build_contract_review_graph(nodes).invoke(initial_state())
+
+    result = final_state["review_results"][0]
+    assert len(contract_service.searches) == 2
+    assert contract_service.content_loads == ["contract-1"]
+    assert [item.source_object_index for item in result.evidence] == [1]
+    assert result.evidence[0].matched_keywords == ["委托第三方"]
+    assert result.absence_check is not None
+    assert result.absence_check.model_dump() == {
+        "keywords": ["分包", "转包", "委托第三方"],
+        "candidate_count": 1,
+    }
+    assert "未经甲方书面同意" in review_llm.prompts[0]
+    assert RERANK_TOP3_DEBUG[0]["text"] not in review_llm.prompts[0]
+    assert [event for event, _ in events].count("absence_check_started") == 1
+    assert [event for event, _ in events].count("absence_keywords_generated") == 1
+    assert [event for event, _ in events].count("absence_candidates_found") == 1
 
 
 def test_aggregate_results_counts_all_statuses_without_llm():

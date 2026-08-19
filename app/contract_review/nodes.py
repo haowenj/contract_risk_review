@@ -3,12 +3,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from app.contract_review.absence import scan_source_objects
 from app.contract_review.prompts import (
     build_parse_review_rules_prompt,
     build_retrieval_query_rewrite_prompt,
     build_review_item_prompt,
 )
 from app.contract_review.schemas import (
+    AbsenceCheckMetadata,
     Evidence,
     ReviewItemList,
     ReviewResult,
@@ -216,6 +218,53 @@ class ContractReviewNodes:
             raise RuntimeError(f"insufficient_result {item.id} failed") from exc
         return {"current_decision": decision}
 
+    def absence_check(
+        self,
+        state: ContractReviewState,
+    ) -> dict[str, Any]:
+        item = state["review_items"][state["current_item_index"]]
+        try:
+            self._emit(
+                "absence_check_started",
+                {
+                    "item_id": item.id,
+                    "retrieval_attempt": state["retrieval_attempt"],
+                },
+            )
+            self._emit(
+                "absence_keywords_generated",
+                {
+                    "item_id": item.id,
+                    "keywords": state["absence_keywords"],
+                },
+            )
+            source_objects = self.contract_service.load_contract_content_objects(
+                state["contract_id"]
+            )
+            scan = scan_source_objects(
+                source_objects,
+                state["absence_keywords"],
+            )
+            candidates = [
+                Evidence.model_validate(value) for value in scan.candidates
+            ]
+            self._emit(
+                "absence_candidates_found",
+                {
+                    "item_id": item.id,
+                    "candidate_count": scan.candidate_count,
+                    "candidates": [
+                        value.model_dump(mode="json") for value in candidates
+                    ],
+                },
+            )
+        except Exception as exc:
+            raise RuntimeError(f"absence_check {item.id} failed") from exc
+        return {
+            "absence_candidates": candidates,
+            "absence_candidate_count": scan.candidate_count,
+        }
+
     def finalize_review_item(
         self,
         state: ContractReviewState,
@@ -226,11 +275,17 @@ class ContractReviewNodes:
             if decision is None:
                 raise ValueError("current_decision is required")
             evidence = state["absence_candidates"] or state["retrieved_evidence"]
+            absence_check = None
+            if state["absence_candidate_count"] is not None:
+                absence_check = AbsenceCheckMetadata(
+                    keywords=state["absence_keywords"],
+                    candidate_count=state["absence_candidate_count"],
+                )
             result = ReviewResult(
                 item_id=item.id,
                 item_name=item.name,
                 evidence=evidence,
-                absence_check=None,
+                absence_check=absence_check,
                 **decision.model_dump(),
             )
             self._emit(

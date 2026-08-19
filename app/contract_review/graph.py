@@ -13,6 +13,12 @@ def route_after_retrieve(state: ContractReviewState) -> str:
         return "risk_decision"
     if state["retrieval_attempt"] < 2:
         return "rewrite_query"
+    return "absence_check"
+
+
+def route_after_absence_check(state: ContractReviewState) -> str:
+    if state["absence_candidates"]:
+        return "risk_decision"
     return "insufficient_result"
 
 
@@ -40,6 +46,7 @@ def build_contract_review_graph(nodes: ContractReviewNodes) -> Any:
     builder.add_node("retrieve_evidence", nodes.retrieve_evidence)
     builder.add_node("rewrite_query", nodes.rewrite_query)
     builder.add_node("risk_decision", nodes.risk_decision)
+    builder.add_node("absence_check", nodes.absence_check)
     builder.add_node("insufficient_result", nodes.insufficient_result)
     builder.add_node("finalize_review_item", nodes.finalize_review_item)
     builder.add_node("aggregate_results", nodes.aggregate_results)
@@ -52,10 +59,18 @@ def build_contract_review_graph(nodes: ContractReviewNodes) -> Any:
         {
             "risk_decision": "risk_decision",
             "rewrite_query": "rewrite_query",
-            "insufficient_result": "insufficient_result",
+            "absence_check": "absence_check",
         },
     )
     builder.add_edge("rewrite_query", "retrieve_evidence")
+    builder.add_conditional_edges(
+        "absence_check",
+        route_after_absence_check,
+        {
+            "risk_decision": "risk_decision",
+            "insufficient_result": "insufficient_result",
+        },
+    )
     builder.add_conditional_edges(
         "risk_decision",
         route_after_risk_decision,
