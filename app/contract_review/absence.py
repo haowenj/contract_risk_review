@@ -39,16 +39,23 @@ def _object_text(source_object: dict[str, Any]) -> tuple[str, str] | None:
 
 def scan_source_objects(
     source_objects: list[dict[str, Any]],
-    keywords: list[str],
+    primary_keywords: list[str],
+    secondary_keywords: list[str],
     *,
     limit: int = MAX_ABSENCE_CANDIDATES,
 ) -> AbsenceScanResult:
     if limit < 1:
         raise ValueError("limit must be positive")
 
-    normalized_keywords = [
+    normalized_primary_keywords = [
         (keyword, normalize_scan_text(keyword))
-        for keyword in keywords
+        for keyword in primary_keywords
+    ]
+    if not any(value for _, value in normalized_primary_keywords):
+        raise ValueError("primary_keywords must contain a usable keyword")
+    normalized_secondary_keywords = [
+        (keyword, normalize_scan_text(keyword))
+        for keyword in secondary_keywords
     ]
     matches: list[dict[str, Any]] = []
     for source_index, source_object in enumerate(source_objects):
@@ -60,20 +67,30 @@ def scan_source_objects(
 
         node_type, evidence_text = extracted
         normalized_text = normalize_scan_text(evidence_text)
-        matched_keywords = [
+        matched_primary_keywords = [
             keyword
-            for keyword, normalized_keyword in normalized_keywords
+            for keyword, normalized_keyword in normalized_primary_keywords
             if normalized_keyword and normalized_keyword in normalized_text
         ]
-        if not matched_keywords:
+        if not matched_primary_keywords:
             continue
+        matched_secondary_keywords = [
+            keyword
+            for keyword, normalized_keyword in normalized_secondary_keywords
+            if normalized_keyword and normalized_keyword in normalized_text
+        ]
 
         matches.append(
             {
                 "source_object_index": source_index,
                 "page_idx": source_object.get("page_idx"),
                 "node_type": node_type,
-                "matched_keywords": matched_keywords,
+                "matched_primary_keywords": matched_primary_keywords,
+                "matched_secondary_keywords": matched_secondary_keywords,
+                "matched_keywords": [
+                    *matched_primary_keywords,
+                    *matched_secondary_keywords,
+                ],
                 "evidence_text": evidence_text,
                 "text": evidence_text,
             }
@@ -81,10 +98,11 @@ def scan_source_objects(
 
     matches.sort(
         key=lambda value: (
-            -len(value["matched_keywords"]),
+            -len(value["matched_primary_keywords"]),
+            -len(value["matched_secondary_keywords"]),
             -max(
                 len(normalize_scan_text(keyword))
-                for keyword in value["matched_keywords"]
+                for keyword in value["matched_primary_keywords"]
             ),
             value["source_object_index"],
         )

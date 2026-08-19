@@ -13,7 +13,13 @@ ABSENCE_DECISION = {
 
 def test_print_progress_labels_absence_events(capsys):
     print_progress("absence_check_started", {"item_id": "item_2"})
-    print_progress("absence_keywords_generated", {"keywords": ["分包"]})
+    print_progress(
+        "absence_keywords_generated",
+        {
+            "primary_keywords": ["分包"],
+            "secondary_keywords": ["第三方"],
+        },
+    )
     print_progress(
         "absence_candidates_found",
         {"candidate_count": 0, "candidates": []},

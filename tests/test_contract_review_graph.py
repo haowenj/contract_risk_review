@@ -66,7 +66,8 @@ SECOND_EVIDENCE = {
 QUERY_REWRITE = {
     "retrieval_query": "乙方权利义务、转委托、第三方履约及委托其他单位实施的约定",
     "reason": "扩展分包和转包的近义表达与相关章节名称",
-    "keywords": ["分包", "转包", "转委托", "委托第三方"],
+    "primary_keywords": ["分包", "转包", "转委托", "委托第三方履行"],
+    "secondary_keywords": ["第三方", "书面同意"],
 }
 
 RERANK_TOP3_DEBUG = [
@@ -146,7 +147,8 @@ def initial_state(**updates):
         "retrieval_attempt": 0,
         "current_retrieval_query": "",
         "retrieved_evidence": [],
-        "absence_keywords": [],
+        "absence_primary_keywords": [],
+        "absence_secondary_keywords": [],
         "absence_candidates": [],
         "absence_candidate_count": None,
         "current_decision": None,
@@ -192,7 +194,8 @@ def test_prepare_review_item_resets_per_item_state():
             retrieval_attempt=2,
             current_retrieval_query="旧查询",
             retrieved_evidence=[Evidence.model_validate(EVIDENCE)],
-            absence_keywords=["旧关键词"],
+            absence_primary_keywords=["旧主关键词"],
+            absence_secondary_keywords=["旧辅助关键词"],
             absence_candidates=[Evidence.model_validate(EVIDENCE)],
             absence_candidate_count=1,
             current_decision=RiskDecision.model_validate(RISK_DECISION),
@@ -203,7 +206,8 @@ def test_prepare_review_item_resets_per_item_state():
         "retrieval_attempt": 1,
         "current_retrieval_query": "合同约定的付款期限是多久",
         "retrieved_evidence": [],
-        "absence_keywords": [],
+        "absence_primary_keywords": [],
+        "absence_secondary_keywords": [],
         "absence_candidates": [],
         "absence_candidate_count": None,
         "current_decision": None,
@@ -390,7 +394,8 @@ def test_graph_scans_after_two_empty_rag_results_and_reviews_absence_candidate()
         query_rewrite_llm=FakeLLM(
             {
                 **QUERY_REWRITE,
-                "keywords": ["分包", "转包", "委托第三方"],
+                "primary_keywords": ["分包", "转包", "委托第三方履行"],
+                "secondary_keywords": ["第三方", "书面同意"],
             }
         ),
         review_llm=review_llm,
@@ -404,10 +409,17 @@ def test_graph_scans_after_two_empty_rag_results_and_reviews_absence_candidate()
     assert len(contract_service.searches) == 2
     assert contract_service.content_loads == ["contract-1"]
     assert [item.source_object_index for item in result.evidence] == [1]
-    assert result.evidence[0].matched_keywords == ["委托第三方"]
+    assert result.evidence[0].matched_primary_keywords == ["委托第三方履行"]
+    assert result.evidence[0].matched_secondary_keywords == ["第三方", "书面同意"]
+    assert result.evidence[0].matched_keywords == [
+        "委托第三方履行",
+        "第三方",
+        "书面同意",
+    ]
     assert result.absence_check is not None
     assert result.absence_check.model_dump() == {
-        "keywords": ["分包", "转包", "委托第三方"],
+        "primary_keywords": ["分包", "转包", "委托第三方履行"],
+        "secondary_keywords": ["第三方", "书面同意"],
         "candidate_count": 1,
     }
     assert "未经甲方书面同意" in review_llm.prompts[0]
@@ -444,7 +456,8 @@ def test_graph_returns_audited_absence_verified_after_two_empty_rag_results():
     assert result.evidence == []
     assert result.absence_check is not None
     assert result.absence_check.model_dump() == {
-        "keywords": ["分包", "转包", "转委托", "委托第三方"],
+        "primary_keywords": ["分包", "转包", "转委托", "委托第三方履行"],
+        "secondary_keywords": ["第三方", "书面同意"],
         "candidate_count": 0,
     }
     assert "合同肯定没有" not in result.finding

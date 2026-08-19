@@ -22,7 +22,8 @@ class ContractReviewState(TypedDict):
     retrieval_attempt: int
     current_retrieval_query: str
     retrieved_evidence: list[Evidence]
-    absence_keywords: list[str]
+    absence_primary_keywords: list[str]
+    absence_secondary_keywords: list[str]
     absence_candidates: list[Evidence]
     absence_candidate_count: int | None
     current_decision: RiskDecision | None

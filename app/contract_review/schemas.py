@@ -60,6 +60,8 @@ def _strip_surrounding_punctuation(value: str) -> str:
 
 _GENERIC_SCAN_KEYWORDS = frozenset(
     {
+        "第三方",
+        "转让",
         "同意",
         "批准",
         "许可",
@@ -146,7 +148,12 @@ def _is_generic_scan_keyword(normalized_key: str) -> bool:
     return not residual
 
 
-def _clean_keywords(value: Any) -> list[str]:
+def _clean_keywords(
+    value: Any,
+    *,
+    filter_generic: bool,
+    require_nonempty: bool,
+) -> list[str]:
     if not isinstance(value, list):
         raise ValueError("keywords must be a list")
 
@@ -159,14 +166,14 @@ def _clean_keywords(value: Any) -> list[str]:
         normalized_key = _normalize_keyword_key(display_value)
         if (
             not normalized_key
-            or _is_generic_scan_keyword(normalized_key)
+            or (filter_generic and _is_generic_scan_keyword(normalized_key))
             or normalized_key in seen
         ):
             continue
         seen.add(normalized_key)
         cleaned.append(display_value)
 
-    if not cleaned:
+    if require_nonempty and not cleaned:
         raise ValueError("keywords must contain at least one non-empty value")
     return cleaned
 
@@ -174,22 +181,74 @@ def _clean_keywords(value: Any) -> list[str]:
 class RetrievalQueryRewrite(StrictModel):
     retrieval_query: str = Field(min_length=1)
     reason: str = Field(min_length=1)
-    keywords: list[str] = Field(min_length=1)
+    primary_keywords: list[str] = Field(min_length=1)
+    secondary_keywords: list[str]
 
-    @field_validator("keywords", mode="before")
+    @field_validator("primary_keywords", mode="before")
     @classmethod
-    def normalize_keywords(cls, value: Any) -> list[str]:
-        return _clean_keywords(value)
+    def normalize_primary_keywords(cls, value: Any) -> list[str]:
+        return _clean_keywords(
+            value,
+            filter_generic=True,
+            require_nonempty=True,
+        )
+
+    @field_validator("secondary_keywords", mode="before")
+    @classmethod
+    def normalize_secondary_keywords(cls, value: Any) -> list[str]:
+        return _clean_keywords(
+            value,
+            filter_generic=False,
+            require_nonempty=False,
+        )
+
+    @model_validator(mode="after")
+    def remove_cross_tier_duplicates(self) -> RetrievalQueryRewrite:
+        primary_keys = {
+            _normalize_keyword_key(value) for value in self.primary_keywords
+        }
+        self.secondary_keywords = [
+            value
+            for value in self.secondary_keywords
+            if _normalize_keyword_key(value) not in primary_keys
+        ]
+        return self
 
 
 class AbsenceCheckMetadata(StrictModel):
-    keywords: list[str] = Field(min_length=1)
+    primary_keywords: list[str] = Field(min_length=1)
+    secondary_keywords: list[str]
     candidate_count: int = Field(ge=0)
 
-    @field_validator("keywords", mode="before")
+    @field_validator("primary_keywords", mode="before")
     @classmethod
-    def normalize_keywords(cls, value: Any) -> list[str]:
-        return _clean_keywords(value)
+    def normalize_primary_keywords(cls, value: Any) -> list[str]:
+        return _clean_keywords(
+            value,
+            filter_generic=True,
+            require_nonempty=True,
+        )
+
+    @field_validator("secondary_keywords", mode="before")
+    @classmethod
+    def normalize_secondary_keywords(cls, value: Any) -> list[str]:
+        return _clean_keywords(
+            value,
+            filter_generic=False,
+            require_nonempty=False,
+        )
+
+    @model_validator(mode="after")
+    def remove_cross_tier_duplicates(self) -> AbsenceCheckMetadata:
+        primary_keys = {
+            _normalize_keyword_key(value) for value in self.primary_keywords
+        }
+        self.secondary_keywords = [
+            value
+            for value in self.secondary_keywords
+            if _normalize_keyword_key(value) not in primary_keys
+        ]
+        return self
 
 
 class Evidence(BaseModel):

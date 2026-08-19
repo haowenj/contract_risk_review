@@ -28,16 +28,24 @@ def test_scan_source_objects_covers_text_table_and_image_with_real_indices():
 
     result = scan_source_objects(
         source_objects,
-        ["转委托", "分包审批", "第三方履行", "禁止转包", "外包限制"],
+        primary_keywords=["转委托", "分包审批", "外包限制"],
+        secondary_keywords=["第三方履行", "禁止转包", "书面批准"],
     )
 
     assert result.candidate_count == 3
     assert [item["source_object_index"] for item in result.candidates] == [2, 3, 1]
     assert result.candidates[0]["node_type"] == "table"
+    assert result.candidates[0]["matched_primary_keywords"] == ["分包审批"]
+    assert result.candidates[0]["matched_secondary_keywords"] == [
+        "第三方履行",
+        "禁止转包",
+        "书面批准",
+    ]
     assert result.candidates[0]["matched_keywords"] == [
         "分包审批",
         "第三方履行",
         "禁止转包",
+        "书面批准",
     ]
     assert result.candidates[1]["node_type"] == "image"
 
@@ -48,11 +56,33 @@ def test_scan_normalizes_nfkc_case_and_whitespace_without_fuzzy_matching():
         {"type": "text", "text": "转委拖", "page_idx": 1},
     ]
 
-    result = scan_source_objects(objects, ["abc", "第三方履行", "转委托"])
+    result = scan_source_objects(
+        objects,
+        primary_keywords=["abc", "转委托"],
+        secondary_keywords=["第三方履行"],
+    )
 
     assert result.candidate_count == 1
     assert result.candidates[0]["source_object_index"] == 0
     assert result.candidates[0]["matched_keywords"] == ["abc", "第三方履行"]
+
+
+def test_secondary_keyword_cannot_create_candidate_without_primary_match():
+    objects = [
+        {"type": "text", "text": "未经甲方书面同意向第三方转让", "page_idx": 0},
+        {"type": "text", "text": "乙方分包须经甲方书面同意", "page_idx": 1},
+    ]
+
+    result = scan_source_objects(
+        objects,
+        primary_keywords=["分包"],
+        secondary_keywords=["第三方", "转让", "书面同意"],
+    )
+
+    assert result.candidate_count == 1
+    assert result.candidates[0]["source_object_index"] == 1
+    assert result.candidates[0]["matched_primary_keywords"] == ["分包"]
+    assert result.candidates[0]["matched_secondary_keywords"] == ["书面同意"]
 
 
 def test_scan_reports_total_count_before_twenty_candidate_limit():
@@ -61,7 +91,12 @@ def test_scan_reports_total_count_before_twenty_candidate_limit():
         for index in range(25)
     ]
 
-    result = scan_source_objects(objects, ["分包限制"], limit=20)
+    result = scan_source_objects(
+        objects,
+        primary_keywords=["分包限制"],
+        secondary_keywords=[],
+        limit=20,
+    )
 
     assert result.candidate_count == 25
     assert len(result.candidates) == 20
@@ -70,6 +105,8 @@ def test_scan_reports_total_count_before_twenty_candidate_limit():
 
 def test_scan_rejects_invalid_limit_and_non_object_member():
     with pytest.raises(ValueError, match="limit"):
-        scan_source_objects([], ["分包"], limit=0)
+        scan_source_objects([], ["分包"], [], limit=0)
+    with pytest.raises(ValueError, match="primary_keywords"):
+        scan_source_objects([], [], ["书面同意"])
     with pytest.raises(ValueError, match="JSON objects"):
-        scan_source_objects(["not-an-object"], ["分包"])
+        scan_source_objects(["not-an-object"], ["分包"], [])

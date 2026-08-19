@@ -99,16 +99,18 @@ def build_retrieval_query_rewrite_prompt(
 2. 使用合同中可能出现的近义词、章节名称、主体称谓和履约表达扩展查询。
 3. 结合已尝试查询、已有 Evidence 和证据不足原因，避免重复原查询。
 4. 生成一个适合 Vector → Rerank → Evidence Selector 链路的自然语言检索问题。
-5. 同时生成用于合同全文确定性扫描的 keywords。keywords 只能围绕当前 rule_basis 和 review_goal 扩展，允许同义词、常见法律表达和措辞变体，不得形成新的风险审查标准。
-6. keywords 应优先使用能够识别当前审查主题的核心术语或具有业务区分度的短语；不要单独输出“同意、批准、许可、责任、合同”等缺乏主题区分度的泛化词。“书面同意、书面批准、书面许可、书面授权”等审批型表达也必须与当前审查主题组合，例如“分包须书面同意”，不得作为独立关键词输出。
-7. keywords 不得包含空字符串或重复项。
-8. 顶层必须是 JSON 对象，只能包含 retrieval_query、reason 和 keywords 三个字段。
+5. 同时生成用于合同全文确定性扫描的 primary_keywords 和 secondary_keywords。两组关键词都只能围绕当前 rule_basis 和 review_goal 扩展，不得形成新的风险审查标准。
+6. primary_keywords 是候选准入条件，必须是能够独立识别当前审查主题的核心术语或具有业务区分度的短语。禁止把“第三方、同意、批准、许可、转让”等脱离审查主题后仍具有大量其他含义的泛化词作为独立 primary keyword；应改成“第三方履行、权利义务转让、分包须书面同意”等主题短语。
+7. secondary_keywords 用于补充命中信息和候选排序，可以包含与当前主题相关的主体、审批或行为辅助表达；secondary_keywords 不能独立形成候选。
+8. 两组关键词不得包含空字符串或各自重复项；同一个关键词不要同时放入两组。
+9. 顶层必须是 JSON 对象，只能包含 retrieval_query、reason、primary_keywords 和 secondary_keywords 四个字段。
 
 JSON 协议：
 {{
   "retrieval_query": "改写后的单个合同检索问题",
   "reason": "本次改写覆盖了哪些遗漏表达",
-  "keywords": ["当前审查主题的核心术语", "具有业务区分度的短语"]
+  "primary_keywords": ["能够独立识别当前审查主题的核心术语或短语"],
+  "secondary_keywords": ["仅用于排序和补充匹配的辅助表达"]
 }}
 
 rule_basis：
@@ -131,7 +133,8 @@ review_goal：
 def build_absence_result_prompt(
     item: ReviewItem,
     *,
-    keywords: list[str],
+    primary_keywords: list[str],
+    secondary_keywords: list[str],
 ) -> str:
     return f"""你需要依据当前风险规范和已经完成的合同缺失核验事实，形成结构化风险判断。
 
@@ -165,6 +168,9 @@ rule_basis：
 review_goal：
 {item.review_goal}
 
-全文扫描关键词：
-{json.dumps(keywords, ensure_ascii=False, indent=2)}
+全文扫描关键词分层：
+{json.dumps({
+    "primary_keywords": primary_keywords,
+    "secondary_keywords": secondary_keywords,
+}, ensure_ascii=False, indent=2)}
 """

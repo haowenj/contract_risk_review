@@ -39,7 +39,8 @@ EVIDENCE = {
 QUERY_REWRITE = {
     "retrieval_query": "乙方权利义务、转委托、第三方履约相关约定",
     "reason": "扩展分包和转包的近义表达与相关章节名称",
-    "keywords": ["分包", "转包", "转委托", "委托第三方"],
+    "primary_keywords": ["分包", "转包", "转委托", "委托第三方履行"],
+    "secondary_keywords": ["第三方", "书面同意"],
 }
 
 ABSENCE_DECISION = {
@@ -220,7 +221,8 @@ def test_service_serializes_zero_candidate_absence_audit():
     result = service.run("contract-1", "付款期限不得超过90日")
 
     assert result["review_results"][0]["absence_check"] == {
-        "keywords": ["分包", "转包", "转委托", "委托第三方"],
+        "primary_keywords": ["分包", "转包", "转委托", "委托第三方履行"],
+        "secondary_keywords": ["第三方", "书面同意"],
         "candidate_count": 0,
     }
     assert result["review_results"][0]["evidence_status"] == "absence_verified"

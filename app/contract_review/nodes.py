@@ -118,7 +118,8 @@ class ContractReviewNodes:
             "retrieval_attempt": 1,
             "current_retrieval_query": item.retrieval_query,
             "retrieved_evidence": [],
-            "absence_keywords": [],
+            "absence_primary_keywords": [],
+            "absence_secondary_keywords": [],
             "absence_candidates": [],
             "absence_candidate_count": None,
             "current_decision": None,
@@ -211,7 +212,8 @@ class ContractReviewNodes:
         return {
             "retrieval_attempt": 2,
             "current_retrieval_query": rewrite.retrieval_query,
-            "absence_keywords": rewrite.keywords,
+            "absence_primary_keywords": rewrite.primary_keywords,
+            "absence_secondary_keywords": rewrite.secondary_keywords,
         }
 
     def risk_decision(
@@ -264,7 +266,8 @@ class ContractReviewNodes:
                 "absence_keywords_generated",
                 {
                     "item_id": item.id,
-                    "keywords": state["absence_keywords"],
+                    "primary_keywords": state["absence_primary_keywords"],
+                    "secondary_keywords": state["absence_secondary_keywords"],
                 },
             )
             source_objects = self.contract_service.load_contract_content_objects(
@@ -272,7 +275,8 @@ class ContractReviewNodes:
             )
             scan = scan_source_objects(
                 source_objects,
-                state["absence_keywords"],
+                state["absence_primary_keywords"],
+                state["absence_secondary_keywords"],
             )
             candidates = [
                 Evidence.model_validate(value) for value in scan.candidates
@@ -305,7 +309,8 @@ class ContractReviewNodes:
             response = self.review_llm.invoke(
                 build_absence_result_prompt(
                     item,
-                    keywords=state["absence_keywords"],
+                    primary_keywords=state["absence_primary_keywords"],
+                    secondary_keywords=state["absence_secondary_keywords"],
                 )
             )
             decision = parse_llm_response(response, RiskDecision)
@@ -329,7 +334,8 @@ class ContractReviewNodes:
                 "absence_confirmed",
                 {
                     "item_id": item.id,
-                    "keywords": state["absence_keywords"],
+                    "primary_keywords": state["absence_primary_keywords"],
+                    "secondary_keywords": state["absence_secondary_keywords"],
                     "candidate_count": 0,
                     "decision": decision.model_dump(mode="json"),
                 },
@@ -351,7 +357,8 @@ class ContractReviewNodes:
             absence_check = None
             if state["absence_candidate_count"] is not None:
                 absence_check = AbsenceCheckMetadata(
-                    keywords=state["absence_keywords"],
+                    primary_keywords=state["absence_primary_keywords"],
+                    secondary_keywords=state["absence_secondary_keywords"],
                     candidate_count=state["absence_candidate_count"],
                 )
             result = ReviewResult(

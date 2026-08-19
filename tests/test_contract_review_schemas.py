@@ -158,14 +158,16 @@ def test_retrieval_query_rewrite_strips_fields_and_rejects_extras():
         {
             "retrieval_query": "  乙方权利义务及第三方履约约定  ",
             "reason": "  扩展分包和转委托的近义表达  ",
-            "keywords": ["  分包  ", "转包"],
+            "primary_keywords": ["  分包  ", "转包"],
+            "secondary_keywords": ["  第三方  ", "书面同意"],
         }
     )
 
     assert rewrite.model_dump() == {
         "retrieval_query": "乙方权利义务及第三方履约约定",
         "reason": "扩展分包和转委托的近义表达",
-        "keywords": ["分包", "转包"],
+        "primary_keywords": ["分包", "转包"],
+        "secondary_keywords": ["第三方", "书面同意"],
     }
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         RetrievalQueryRewrite.model_validate(
@@ -176,25 +178,36 @@ def test_retrieval_query_rewrite_strips_fields_and_rejects_extras():
         )
 
 
-def test_retrieval_query_rewrite_normalizes_and_deduplicates_keywords():
+def test_retrieval_query_rewrite_normalizes_and_deduplicates_keyword_tiers():
     rewrite = RetrievalQueryRewrite.model_validate(
         {
             "retrieval_query": "检索乙方分包、转包和第三方履约限制",
             "reason": "覆盖同义表达",
-            "keywords": [" 分包 ", "转包", "ＦＥＮＢＡＯ", "fenbao", "", "转委托"],
+            "primary_keywords": [
+                " 分包 ",
+                "转包",
+                "ＦＥＮＢＡＯ",
+                "fenbao",
+                "",
+                "转委托",
+            ],
+            "secondary_keywords": [" 第三方 ", "第三方", "", "书面同意"],
         }
     )
 
-    assert rewrite.keywords == ["分包", "转包", "ＦＥＮＢＡＯ", "转委托"]
+    assert rewrite.primary_keywords == ["分包", "转包", "ＦＥＮＢＡＯ", "转委托"]
+    assert rewrite.secondary_keywords == ["第三方", "书面同意"]
 
 
-def test_retrieval_query_rewrite_drops_standalone_generic_approval_keywords():
+def test_retrieval_query_rewrite_drops_generic_primary_but_allows_secondary():
     rewrite = RetrievalQueryRewrite.model_validate(
         {
             "retrieval_query": "检索乙方分包审批限制",
             "reason": "覆盖审批表达",
-            "keywords": [
+            "primary_keywords": [
                 "分包",
+                "第三方",
+                "转让",
                 "书面同意",
                 "书面批准",
                 "书面授权",
@@ -207,18 +220,20 @@ def test_retrieval_query_rewrite_drops_standalone_generic_approval_keywords():
                 "合同",
                 "分包须书面同意",
             ],
+            "secondary_keywords": ["第三方", "转让", "书面同意", "批准", "许可"],
         }
     )
 
-    assert rewrite.keywords == ["分包", "分包须书面同意"]
+    assert rewrite.primary_keywords == ["分包", "分包须书面同意"]
+    assert rewrite.secondary_keywords == ["第三方", "转让", "书面同意", "批准", "许可"]
 
 
-def test_retrieval_query_rewrite_drops_punctuated_generic_keywords():
+def test_retrieval_query_rewrite_drops_punctuated_generic_primary_keywords():
     rewrite = RetrievalQueryRewrite.model_validate(
         {
             "retrieval_query": "检索乙方分包审批限制",
             "reason": "覆盖审批表达",
-            "keywords": [
+            "primary_keywords": [
                 "同意。",
                 "（批准）",
                 "“合同”：",
@@ -226,23 +241,26 @@ def test_retrieval_query_rewrite_drops_punctuated_generic_keywords():
                 "违约金5%",
                 "违约金5％",
             ],
+            "secondary_keywords": [],
         }
     )
 
-    assert rewrite.keywords == ["乙方分包", "违约金5%"]
+    assert rewrite.primary_keywords == ["乙方分包", "违约金5%"]
+    assert rewrite.secondary_keywords == []
 
 
 @pytest.mark.parametrize(
-    "keywords",
+    "primary_keywords",
     [[], ["", "   "], ["书面同意", "批准", "合同"]],
 )
-def test_retrieval_query_rewrite_rejects_unusable_keywords(keywords):
-    with pytest.raises(ValidationError, match="keywords"):
+def test_retrieval_query_rewrite_rejects_unusable_primary_keywords(primary_keywords):
+    with pytest.raises(ValidationError, match="primary_keywords"):
         RetrievalQueryRewrite.model_validate(
             {
                 "retrieval_query": "检索乙方分包限制",
                 "reason": "覆盖同义表达",
-                "keywords": keywords,
+                "primary_keywords": primary_keywords,
+                "secondary_keywords": [],
             }
         )
 
@@ -260,23 +278,39 @@ def test_absence_verified_review_result_preserves_scan_audit():
             "suggestion": "建议补充明确限制条款。",
             "evidence": [],
             "absence_check": {
-                "keywords": [" 分包 ", "转包", "分包"],
+                "primary_keywords": [" 分包 ", "转包", "分包"],
+                "secondary_keywords": ["第三方", "书面同意", "第三方"],
                 "candidate_count": 0,
             },
         }
     )
 
     assert result.absence_check is not None
-    assert result.absence_check.keywords == ["分包", "转包"]
+    assert result.absence_check.primary_keywords == ["分包", "转包"]
+    assert result.absence_check.secondary_keywords == ["第三方", "书面同意"]
     assert result.absence_check.candidate_count == 0
 
 
 @pytest.mark.parametrize(
     ("evidence", "absence_check"),
     [
-        ([EVIDENCE], {"keywords": ["分包"], "candidate_count": 0}),
+        (
+            [EVIDENCE],
+            {
+                "primary_keywords": ["分包"],
+                "secondary_keywords": [],
+                "candidate_count": 0,
+            },
+        ),
         ([], None),
-        ([], {"keywords": ["分包"], "candidate_count": 1}),
+        (
+            [],
+            {
+                "primary_keywords": ["分包"],
+                "secondary_keywords": [],
+                "candidate_count": 1,
+            },
+        ),
     ],
 )
 def test_absence_verified_review_result_rejects_inconsistent_audit(
