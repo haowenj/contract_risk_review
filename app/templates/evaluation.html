@@ -178,15 +178,17 @@
   </style>
 </head>
 {% macro image_evidence(node) %}
-  {% if node.node_type is defined and node.node_type == "image" %}
+  {% if node.node_type is defined and node.node_type in ["image", "table"] and node.img_path is defined %}
     <div class="image-evidence">
-      <strong>图片证据 · {{ node.image_type or "未分类" }}</strong>
-      {% if node.img_path is defined %}
-        <div>原始图片：{{ node.img_path }}</div>
-        <img src="/contracts/{{ selected_contract.contract_id }}/images/{{ node.img_path }}" alt="合同图片证据" loading="lazy">
+      {% if node.node_type == "table" %}
+        <strong>表格原图</strong>
+      {% else %}
+        <strong>图片证据 · {{ node.image_type or "未分类" }}</strong>
       {% endif %}
-      {% if node.verification_status is defined %}<div>校验状态（verification_status）：{{ node.verification_status }}</div>{% endif %}
-      {% if node.structured_data is defined %}<pre>{{ node.structured_data | tojson(indent=2) }}</pre>{% endif %}
+      <div>原始图片：{{ node.img_path }}</div>
+      <img src="/contracts/{{ selected_contract.contract_id }}/images/{{ node.img_path }}" alt="{{ '表格原图' if node.node_type == 'table' else '合同图片证据' }}" loading="lazy">
+      {% if node.node_type == "image" and node.verification_status is defined %}<div>校验状态（verification_status）：{{ node.verification_status }}</div>{% endif %}
+      {% if node.node_type == "image" and node.structured_data is defined %}<pre>{{ node.structured_data | tojson(indent=2) }}</pre>{% endif %}
     </div>
   {% endif %}
 {% endmacro %}

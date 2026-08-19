@@ -39,6 +39,7 @@ def table_result_for(index: int, text: str, score: float = 0.8):
             "table_body": "<table><tr><td>30%</td></tr></table>",
             "table_caption": ["付款计划"],
             "table_footnote": ["以到账为准"],
+            "img_path": "images/payment-table.jpg",
         },
     )
     return SimpleNamespace(node=node, score=score)
@@ -152,6 +153,7 @@ class AppQATest(TestCase):
         self.assertEqual(evidence["table_caption"], ["付款计划"])
         self.assertEqual(evidence["table_footnote"], ["以到账为准"])
         self.assertEqual(evidence["bbox"], [1, 2, 3, 4])
+        self.assertEqual(evidence["img_path"], "images/payment-table.jpg")
 
     def test_answer_question_serializes_image_reference_and_verification(self):
         result = answer_question(

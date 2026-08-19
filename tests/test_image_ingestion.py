@@ -201,6 +201,26 @@ def test_general_never_calls_ocr(tmp_path):
     assert ocr.calls == []
 
 
+def test_table_image_is_not_sent_to_vision_or_ocr(tmp_path):
+    table = {
+        "type": "table",
+        "img_path": "images/table.jpg",
+        "table_body": "<table><tr><td>开户信息</td></tr></table>",
+    }
+    vision = FakeVision(general_extraction())
+    ocr = FakeOCR("must not be called")
+    service = ContractImageIngestionService(
+        vision_service=vision,
+        ocr_service=ocr,
+    )
+
+    enriched = service.enrich_images([table], storage_dir=tmp_path)
+
+    assert enriched == [table]
+    assert vision.calls == []
+    assert ocr.calls == []
+
+
 def test_empty_general_result_is_recorded_without_ocr(tmp_path):
     image_path = write_test_image(tmp_path, "images/empty.jpg")
     empty_general = validate_image_extraction(

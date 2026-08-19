@@ -58,7 +58,8 @@ class MinerURawParseTest(TestCase):
 
         raw_content = (
             b'[{"type":"text","page_idx":0},\n '
-            b'{"type":"table","page_idx":1}, '
+            b'{"type":"table","img_path":"images/table.jpg",'
+            b'"page_idx":1}, '
             b'{"type":"image","img_path":"images/account.jpg",'
             b'"page_idx":1}, {"page_idx":1}]'
         )
@@ -66,6 +67,7 @@ class MinerURawParseTest(TestCase):
         with zipfile.ZipFile(archive_buffer, "w") as archive:
             archive.writestr("contract_content_list.json", raw_content)
             archive.writestr("images/account.jpg", b"jpeg-bytes")
+            archive.writestr("images/table.jpg", b"table-jpeg-bytes")
 
         status_calls = 0
 
@@ -124,4 +126,8 @@ class MinerURawParseTest(TestCase):
             self.assertEqual(
                 (root / "images" / "account.jpg").read_bytes(),
                 b"jpeg-bytes",
+            )
+            self.assertEqual(
+                (root / "images" / "table.jpg").read_bytes(),
+                b"table-jpeg-bytes",
             )

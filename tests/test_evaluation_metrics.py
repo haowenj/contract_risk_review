@@ -29,6 +29,7 @@ def table_result_for(source_object_index: int, text: str, score: float = 0.9):
             "table_body": "<table><tr><td>30%</td></tr></table>",
             "table_caption": ["付款计划"],
             "table_footnote": ["以到账为准"],
+            "img_path": "images/payment-table.jpg",
         },
     )
     return SimpleNamespace(node=node, score=score)
@@ -143,6 +144,7 @@ def test_serialize_pipeline_result_keeps_original_table_information():
     assert evidence["table_body"].startswith("<table>")
     assert evidence["table_caption"] == ["付款计划"]
     assert evidence["table_footnote"] == ["以到账为准"]
+    assert evidence["img_path"] == "images/payment-table.jpg"
 
 
 def test_serialize_pipeline_result_keeps_image_reference_and_verification():

@@ -244,6 +244,46 @@ def test_evaluation_page_renders_image_fields_in_all_retrieval_stages():
     assert response.text.count("verified") >= 3
 
 
+def test_evaluation_page_renders_table_image_in_all_retrieval_stages():
+    with TemporaryDirectory() as temp_dir:
+        client, service = build_client(Path(temp_dir))
+        table = {
+            "node_type": "table",
+            "source_object_index": 7,
+            "page_idx": 2,
+            "img_path": "images/payment-table.jpg",
+            "evidence_text": "第1行：付款比例 | 30%",
+        }
+        service.latest_evaluation_run_payload.return_value = {
+            "run_id": "run-table",
+            "status": "ready",
+            "items": [
+                {
+                    "question": "付款比例？",
+                    "expected_source_object_indices": [7],
+                    "result": {
+                        "vector_source_object_indices": [7],
+                        "rerank_source_object_indices": [7],
+                        "vector_recall_at_5": 1.0,
+                        "vector_recall_at_10": 1.0,
+                        "rerank_recall_at_5": 1.0,
+                        "rerank_recall_at_10": 1.0,
+                        "vector_results": [table],
+                        "reranked_results": [table],
+                        "selected_nodes": [table],
+                        "llm_summary": {"answer": "付款比例为30%。"},
+                    },
+                }
+            ],
+        }
+
+        response = client.get("/contracts/c1/evaluation")
+
+    assert response.status_code == 200
+    assert response.text.count("表格原图") >= 3
+    assert response.text.count("images/payment-table.jpg") >= 3
+
+
 def test_all_run_route_schedules_background_execution():
     with TemporaryDirectory() as temp_dir:
         client, service = build_client(Path(temp_dir))

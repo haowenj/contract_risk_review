@@ -144,7 +144,7 @@ def _write_referenced_images(
     for item in content_list:
         if not (
             isinstance(item, dict)
-            and item.get("type") == "image"
+            and item.get("type") in {"image", "table"}
             and isinstance(item.get("img_path"), str)
         ):
             continue

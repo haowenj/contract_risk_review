@@ -59,7 +59,13 @@ def serialize_node_result(result: Any) -> dict[str, Any]:
         _add_metadata(
             serialized,
             metadata,
-            ("bbox", "table_body", "table_caption", "table_footnote"),
+            (
+                "bbox",
+                "table_body",
+                "table_caption",
+                "table_footnote",
+                "img_path",
+            ),
         )
     elif node_type == "image":
         _add_metadata(serialized, metadata, ("bbox", *_IMAGE_METADATA_KEYS))

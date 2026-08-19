@@ -150,6 +150,7 @@ def build_nodes(
             "table_body": obj.get("table_body"),
             "table_caption": obj.get("table_caption"),
             "table_footnote": obj.get("table_footnote"),
+            "img_path": obj.get("img_path"),
         }
         metadata = {
             key: value

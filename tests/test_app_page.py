@@ -205,3 +205,47 @@ class ServerRenderedPageTest(TestCase):
         self.assertIn("verification_status", response.text)
         self.assertEqual(image_response.status_code, 200)
         self.assertEqual(image_response.content, b"jpeg")
+
+    def test_page_renders_table_evidence_with_original_image_reference(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = Settings(
+                project_dir=root,
+                data_dir=root / "data",
+                database_path=root / "data" / "contracts.db",
+                contracts_dir=root / "data" / "contracts",
+                mineru_url="http://mineru.test",
+                mineru_backend="hybrid-engine",
+                mineru_server_url=None,
+            )
+            repository = ContractRepository(settings.database_path)
+            contract_dir = root / "contract"
+            contract = repository.create("contract.pdf", contract_dir)
+            repository.update_status(contract.contract_id, "ready")
+            service = Mock()
+            service.list_contracts.return_value = [repository.get(contract.contract_id)]
+            service.get_contract.return_value = repository.get(contract.contract_id)
+            service.ask.return_value = {
+                "answer": "付款比例为30%。",
+                "evidence": [
+                    {
+                        "node_type": "table",
+                        "source_object_index": 7,
+                        "page_idx": 2,
+                        "img_path": "images/payment-table.jpg",
+                        "evidence_text": "第1行：付款比例 | 30%",
+                    }
+                ],
+                "debug": None,
+            }
+
+            response = TestClient(
+                create_app(settings=settings, service=service)
+            ).post(
+                f"/contracts/{contract.contract_id}/chat",
+                data={"contract_id": contract.contract_id, "question": "付款比例？"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("表格原图", response.text)
+        self.assertIn("images/payment-table.jpg", response.text)

@@ -75,6 +75,7 @@ class MineruToNodesTest(TestCase):
                 ),
                 "table_caption": ["付款计划"],
                 "table_footnote": ["以到账为准"],
+                "img_path": "images/payment-table.jpg",
                 "page_idx": 2,
                 "bbox": [1, 2, 3, 4],
             }
@@ -95,6 +96,7 @@ class MineruToNodesTest(TestCase):
         )
         self.assertEqual(node.metadata["table_caption"], ["付款计划"])
         self.assertEqual(node.metadata["table_footnote"], ["以到账为准"])
+        self.assertEqual(node.metadata["img_path"], "images/payment-table.jpg")
         self.assertIn("付款比例", node.text)
         self.assertIn("30%", node.get_content(metadata_mode=MetadataMode.EMBED))
         self.assertIn(
@@ -102,6 +104,10 @@ class MineruToNodesTest(TestCase):
             node.get_content(metadata_mode=MetadataMode.EMBED),
         )
         self.assertNotIn("table_body", node.get_content(metadata_mode=MetadataMode.EMBED))
+        self.assertNotIn(
+            "images/payment-table.jpg",
+            node.get_content(metadata_mode=MetadataMode.EMBED),
+        )
 
     def test_build_nodes_creates_image_node_with_reference_and_searchable_text(self):
         objects = [
