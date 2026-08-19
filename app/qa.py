@@ -3,47 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 import retrieval_evaluation
+from app.evidence_serialization import serialize_node_result
 from app.rag_pipeline import RAGPipeline
 
 
 def _serialize_result(result: Any) -> dict[str, Any]:
-    node = result.node
-    metadata = getattr(node, "metadata", {}) or {}
-    serialized: dict[str, Any] = {
-        "source_object_index": metadata.get("source_object_index"),
-        "node_id": getattr(node, "node_id", None),
-        "text": getattr(node, "text", ""),
-    }
-    for key in (
-        "page_idx",
-        "start_page_idx",
-        "end_page_idx",
-        "source_page_indices",
-        "source_bboxes",
-        "merged_cross_page",
-        "retrieval_context",
-    ):
-        if key in metadata and metadata[key] is not None:
-            serialized[key] = metadata[key]
-
-    if metadata.get("node_type") == "table":
-        for key in (
-            "node_type",
-            "bbox",
-            "table_body",
-            "table_caption",
-            "table_footnote",
-        ):
-            if key in metadata and metadata[key] is not None:
-                serialized[key] = metadata[key]
-
-    score = getattr(result, "score", None)
-    if score is not None:
-        serialized["score"] = score
-    retrieval_score = metadata.get("retrieval_score")
-    if retrieval_score is not None:
-        serialized["retrieval_score"] = retrieval_score
-    return serialized
+    return serialize_node_result(result)
 
 
 def answer_question(
