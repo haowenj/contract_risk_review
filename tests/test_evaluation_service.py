@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -8,6 +9,7 @@ import pytest
 from app.db import ContractRepository
 from app.evaluation_db import EvaluationRepository
 from app.evaluation_service import EvaluationService, EvaluationStaleError
+from app.service import ContractService
 
 
 def result_for(source_object_index: int, text: str, score: float = 0.9):
@@ -67,6 +69,78 @@ def test_service_rejects_case_bound_to_old_index_version():
 
         with pytest.raises(EvaluationStaleError):
             service.create_single_run("c1", old_case.case_id)
+
+
+def test_source_object_entries_preserve_original_indices_and_content():
+    with TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        service, _, _, _, _ = build_service(root)
+        source_objects = [
+            {"type": "text", "text": "付款方式"},
+            {"type": "table", "table_body": [["甲方", "乙方"]]},
+        ]
+        contract_dir = root / "contract"
+        contract_dir.mkdir(parents=True)
+        (contract_dir / "merged_content_list.json").write_text(
+            json.dumps(source_objects, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        entries = service.list_source_object_entries("c1")
+
+    assert entries == [
+        {"source_object_index": 0, "object": source_objects[0]},
+        {"source_object_index": 1, "object": source_objects[1]},
+    ]
+
+
+def test_retrieval_context_entries_load_saved_contexts():
+    with TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        service, _, _, _, _ = build_service(root)
+        context_entries = [
+            {
+                "source_object_index": 7,
+                "retrieval_context": "文档章节：付款条款",
+            }
+        ]
+        contract_dir = root / "contract"
+        contract_dir.mkdir(parents=True)
+        (contract_dir / "retrieval_context.json").write_text(
+            json.dumps(context_entries, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        entries = service.list_retrieval_context_entries("c1")
+
+    assert entries == context_entries
+
+
+def test_contract_service_exposes_retrieval_context_entries():
+    evaluation_service = Mock()
+    evaluation_service.list_retrieval_context_entries.return_value = [
+        {
+            "source_object_index": 7,
+            "retrieval_context": "文档章节：付款条款",
+        }
+    ]
+    service = ContractService(
+        Mock(),
+        Mock(),
+        Mock(),
+        Mock(),
+        evaluation_service=evaluation_service,
+    )
+
+    entries = service.list_retrieval_context_entries("c1")
+
+    assert entries == [
+        {
+            "source_object_index": 7,
+            "retrieval_context": "文档章节：付款条款",
+        }
+    ]
+    evaluation_service.list_retrieval_context_entries.assert_called_once_with("c1")
 
 
 def test_execute_all_run_reuses_one_persisted_index_and_saves_full_results():

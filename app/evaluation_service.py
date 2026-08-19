@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from app.db import ContractRepository
@@ -39,6 +41,22 @@ class EvaluationStaleError(RuntimeError):
     pass
 
 
+class EvaluationMetadataNotFoundError(FileNotFoundError):
+    pass
+
+
+class EvaluationMetadataInvalidError(ValueError):
+    pass
+
+
+class EvaluationRetrievalContextNotFoundError(FileNotFoundError):
+    pass
+
+
+class EvaluationRetrievalContextInvalidError(ValueError):
+    pass
+
+
 class EvaluationService:
     def __init__(
         self,
@@ -73,6 +91,62 @@ class EvaluationService:
             )
             for item in retrieval_evaluation.EVALUATION_QUERIES
         ]
+
+    def list_source_object_entries(
+        self,
+        contract_id: str,
+    ) -> list[dict[str, Any]]:
+        contract = self._ready_contract(contract_id)
+        source_path = Path(contract.storage_dir) / "merged_content_list.json"
+        try:
+            with source_path.open("r", encoding="utf-8") as source_file:
+                source_objects = json.load(source_file)
+        except FileNotFoundError as exc:
+            raise EvaluationMetadataNotFoundError(str(source_path)) from exc
+        except json.JSONDecodeError as exc:
+            raise EvaluationMetadataInvalidError(
+                f"解析对象不是有效的 JSON：{source_path}"
+            ) from exc
+
+        if not isinstance(source_objects, list):
+            raise EvaluationMetadataInvalidError(
+                "解析对象必须是 JSON 数组"
+            )
+
+        return [
+            {
+                "source_object_index": source_object_index,
+                "object": source_object,
+            }
+            for source_object_index, source_object in enumerate(source_objects)
+        ]
+
+    def list_retrieval_context_entries(
+        self,
+        contract_id: str,
+    ) -> list[dict[str, Any]]:
+        contract = self._ready_contract(contract_id)
+        context_path = Path(contract.storage_dir) / "retrieval_context.json"
+        try:
+            with context_path.open("r", encoding="utf-8") as context_file:
+                context_entries = json.load(context_file)
+        except FileNotFoundError as exc:
+            raise EvaluationRetrievalContextNotFoundError(
+                str(context_path)
+            ) from exc
+        except json.JSONDecodeError as exc:
+            raise EvaluationRetrievalContextInvalidError(
+                f"检索上下文不是有效的 JSON：{context_path}"
+            ) from exc
+
+        if not isinstance(context_entries, list) or any(
+            not isinstance(entry, dict) for entry in context_entries
+        ):
+            raise EvaluationRetrievalContextInvalidError(
+                "检索上下文必须是 JSON 对象数组"
+            )
+
+        return context_entries
 
     def list_cases(self, contract_id: str) -> list[EvaluationCase]:
         return self.evaluation_repository.list_cases(contract_id)

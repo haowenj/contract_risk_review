@@ -108,4 +108,4 @@ class ContractRepositoryTest(TestCase):
             loaded = repository.get("legacy-id")
 
         self.assertIn("index_version", columns)
-        self.assertIsNone(loaded.index_version)
+        self.assertEqual(loaded.index_version, "legacy-legacy-id")

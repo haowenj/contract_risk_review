@@ -167,6 +167,30 @@
       color: #5f7087;
     }
 
+    .image-evidence {
+      margin: 8px 0;
+      padding: 10px;
+      border-radius: 8px;
+      background: #f5f8fb;
+      overflow-wrap: anywhere;
+    }
+
+    .image-evidence img {
+      display: block;
+      max-width: min(360px, 100%);
+      max-height: 240px;
+      margin-top: 8px;
+      border: 1px solid #d9e2ec;
+      border-radius: 6px;
+      object-fit: contain;
+    }
+
+    .image-evidence pre {
+      margin: 8px 0 0;
+      background: white;
+      color: #172033;
+    }
+
     .debug-card {
       margin-top: 18px;
       padding: 18px;
@@ -200,6 +224,19 @@
     }
   </style>
 </head>
+{% macro image_evidence(item) %}
+  {% if item.node_type is defined and item.node_type == "image" %}
+    <div class="image-evidence">
+      <strong>图片证据 · {{ item.image_type or "未分类" }}</strong>
+      {% if item.img_path is defined %}
+        <div>原始图片：{{ item.img_path }}</div>
+        <img src="/contracts/{{ selected_contract.contract_id }}/images/{{ item.img_path }}" alt="合同图片证据" loading="lazy">
+      {% endif %}
+      {% if item.verification_status is defined %}<div>校验状态（verification_status）：{{ item.verification_status }}</div>{% endif %}
+      {% if item.structured_data is defined %}<pre>{{ item.structured_data | tojson(indent=2) }}</pre>{% endif %}
+    </div>
+  {% endif %}
+{% endmacro %}
 <body>
   <header class="topbar">
     <strong>合同风险审阅</strong>
@@ -213,7 +250,7 @@
 
     <section class="card">
       <h1>{{ selected_contract.filename }}</h1>
-      <p class="meta">状态：{{ selected_contract.status }}{% if selected_contract.status == "ready" %} · 已加载持久化索引{% endif %}</p>
+      <p class="meta">状态：{{ selected_contract.status|status_label }}{% if selected_contract.status == "ready" %} · 已加载持久化索引{% endif %}</p>
 
       {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
 
@@ -226,7 +263,7 @@
           </div>
         </form>
       {% else %}
-        <div class="state-card">当前合同还没有完成入库，请返回任务列表等待状态变为 ready。</div>
+        <div class="state-card">当前合同还没有完成入库，请返回任务列表等待状态变为“可问答”。</div>
       {% endif %}
 
       {% if answer_result %}
@@ -236,7 +273,8 @@
           {% for item in answer_result.evidence %}
             <div class="evidence">
               <small>Selected Evidence · source_object_index={{ item.source_object_index }}{% if item.page_idx is defined %} · page={{ item.page_idx }}{% endif %}</small>
-              {{ item.text }}
+              {{ image_evidence(item) }}
+              {{ item.evidence_text if item.evidence_text is defined else item.text }}
             </div>
           {% else %}
             <p class="meta">没有筛选出证据。</p>
@@ -250,12 +288,13 @@
             {% for item in answer_result.debug.rerank_top10 %}
               <div class="evidence">
                 <small>source_object_index={{ item.source_object_index }} · score={{ item.score }}</small>
-                {{ item.text }}
+                {{ image_evidence(item) }}
+                {{ item.evidence_text if item.evidence_text is defined else item.text }}
               </div>
             {% endfor %}
             <h3>Selected Evidence</h3>
             {% for item in answer_result.debug.selected_evidence %}
-              <div class="evidence">{{ item.text }}</div>
+              <div class="evidence">{{ image_evidence(item) }}{{ item.evidence_text if item.evidence_text is defined else item.text }}</div>
             {% endfor %}
             <h3>Final Answer</h3>
             <div class="answer-body">{{ answer_result.debug.final_answer|markdown }}</div>

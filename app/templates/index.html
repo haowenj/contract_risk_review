@@ -218,6 +218,36 @@
       gap: 8px;
     }
 
+    .reprocess-options {
+      display: grid;
+      gap: 10px;
+      margin: 20px 0;
+    }
+
+    .reprocess-option {
+      display: block;
+      padding: 13px 14px;
+      border: 1px solid #d9e2ec;
+      border-radius: 10px;
+      background: #fbfdff;
+      cursor: pointer;
+    }
+
+    .reprocess-option:has(input:checked) {
+      border-color: #315b8c;
+      background: #eff6ff;
+    }
+
+    .reprocess-option strong,
+    .reprocess-option small {
+      display: block;
+    }
+
+    .reprocess-option small {
+      margin: 4px 0 0 24px;
+      color: #5f7087;
+    }
+
     @media (max-width: 720px) {
       .topbar { padding: 0 18px; }
       .dashboard-shell {
@@ -274,15 +304,17 @@
               <small class="task-error">{{ contract.error_message }}</small>
             {% endif %}
           </div>
-          <span class="status status-{{ contract.status }}">{{ contract.status }}</span>
+          <span class="status status-{{ contract.status }}">{{ contract.status|status_label }}</span>
           <div class="task-actions">
             {% if contract.status == "ready" %}
               <a class="button primary" href="/contracts/{{ contract.contract_id }}">开始问答</a>
-              <a class="button" href="/contracts/{{ contract.contract_id }}/evaluation">Evaluation</a>
+              <a class="button" href="/contracts/{{ contract.contract_id }}/evaluation">召回测试</a>
+              <button type="button" data-reprocess-contract-id="{{ contract.contract_id }}">重新解析</button>
             {% elif contract.status == "failed" %}
+              <button type="button" data-reprocess-contract-id="{{ contract.contract_id }}">重新解析</button>
               <button type="button" data-error-message="{{ contract.error_message or '入库失败，请查看服务日志。' }}">错误详情</button>
             {% else %}
-              <button type="button" disabled>等待入库</button>
+              <button type="button" disabled>{{ contract.status|status_label }}</button>
             {% endif %}
           </div>
         </li>
@@ -303,6 +335,30 @@
     </div>
   </dialog>
 
+  <dialog id="reprocess-dialog" aria-labelledby="reprocess-title">
+    <form id="reprocess-form" class="modal">
+      <header>
+        <h2 id="reprocess-title">重新解析</h2>
+        <button id="close-reprocess" class="close" type="button" aria-label="关闭">×</button>
+      </header>
+      <p>请选择本次重新解析的方式。</p>
+      <div class="reprocess-options">
+        <label class="reprocess-option">
+          <strong><input type="radio" name="reprocess-mode" value="reuse_existing" checked> 复用已有解析结果</strong>
+          <small>保留已有解析文件，重新整理内容并生成检索数据和索引。</small>
+        </label>
+        <label class="reprocess-option">
+          <strong><input type="radio" name="reprocess-mode" value="from_scratch"> 从头解析合同</strong>
+          <small>重新读取 PDF，完整执行合同解析和入库。</small>
+        </label>
+      </div>
+      <footer>
+        <button id="cancel-reprocess" type="button">取消</button>
+        <button id="start-reprocess" class="primary" type="submit">开始重新解析</button>
+      </footer>
+    </form>
+  </dialog>
+
   <script>
     const contractList = document.querySelector('#contract-list');
     const queueSummary = document.querySelector('#queue-summary');
@@ -312,13 +368,28 @@
     const errorDialog = document.querySelector('#error-dialog');
     const errorMessage = document.querySelector('#error-message');
     const selectedFile = document.querySelector('#selected-file');
+    const reprocessDialog = document.querySelector('#reprocess-dialog');
+    const reprocessForm = document.querySelector('#reprocess-form');
+    const startReprocess = document.querySelector('#start-reprocess');
+    let reprocessContractId = '';
 
-    function createButton(label, { disabled = false, error = '' } = {}) {
+    const statusLabels = {
+      queued: '排队中',
+      processing: '处理中',
+      ready: '可问答',
+      failed: '失败',
+    };
+
+    function createButton(
+      label,
+      { disabled = false, error = '', reprocessContractId = '' } = {},
+    ) {
       const button = document.createElement('button');
       button.type = 'button';
       button.textContent = label;
       button.disabled = disabled;
       if (error) button.dataset.errorMessage = error;
+      if (reprocessContractId) button.dataset.reprocessContractId = reprocessContractId;
       return button;
     }
 
@@ -348,7 +419,7 @@
         failed: 'status-failed',
       }[contract.status] || '';
       status.className = `status ${statusClass}`;
-      status.textContent = contract.status;
+      status.textContent = statusLabels[contract.status] || contract.status;
 
       const actions = document.createElement('div');
       actions.className = 'task-actions';
@@ -361,15 +432,23 @@
         const evaluationLink = document.createElement('a');
         evaluationLink.className = 'button';
         evaluationLink.href = `/contracts/${encodeURIComponent(contract.contract_id)}/evaluation`;
-        evaluationLink.textContent = 'Evaluation';
+        evaluationLink.textContent = '召回测试';
         actions.append(evaluationLink);
+        actions.append(createButton(
+          '重新解析',
+          { reprocessContractId: contract.contract_id },
+        ));
       } else if (contract.status === 'failed') {
+        actions.append(createButton(
+          '重新解析',
+          { reprocessContractId: contract.contract_id },
+        ));
         actions.append(createButton(
           '错误详情',
           { error: contract.error_message || '入库失败，请查看服务日志。' },
         ));
       } else {
-        actions.append(createButton('等待入库', { disabled: true }));
+        actions.append(createButton(statusLabels[contract.status] || '处理中', { disabled: true }));
       }
 
       row.append(identity, status, actions);
@@ -404,7 +483,50 @@
       }
     }
 
-    contractList.addEventListener('click', (event) => {
+    function openReprocessDialog(button) {
+      reprocessContractId = button.dataset.reprocessContractId;
+      reprocessDialog.showModal();
+    }
+
+    async function submitReprocess(event) {
+      event.preventDefault();
+      if (!reprocessContractId) return;
+
+      const selectedMode = reprocessForm.querySelector(
+        'input[name="reprocess-mode"]:checked',
+      )?.value || 'reuse_existing';
+      startReprocess.disabled = true;
+      startReprocess.textContent = '提交中…';
+      try {
+        const response = await fetch(
+          `/api/contracts/${encodeURIComponent(reprocessContractId)}/reprocess`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: selectedMode }),
+          },
+        );
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload.detail || '重新解析失败，请稍后再试。');
+        }
+        reprocessDialog.close();
+        await refreshContracts();
+      } catch (error) {
+        errorMessage.textContent = error.message || '重新解析失败，请稍后再试。';
+        errorDialog.showModal();
+      } finally {
+        startReprocess.disabled = false;
+        startReprocess.textContent = '开始重新解析';
+      }
+    }
+
+    contractList.addEventListener('click', async (event) => {
+      const reprocessButton = event.target.closest('[data-reprocess-contract-id]');
+      if (reprocessButton) {
+        openReprocessDialog(reprocessButton);
+        return;
+      }
       const button = event.target.closest('[data-error-message]');
       if (!button) return;
       errorMessage.textContent = button.dataset.errorMessage;
@@ -413,6 +535,9 @@
 
     document.querySelector('#close-error').addEventListener('click', () => errorDialog.close());
     document.querySelector('#dismiss-error').addEventListener('click', () => errorDialog.close());
+    document.querySelector('#close-reprocess').addEventListener('click', () => reprocessDialog.close());
+    document.querySelector('#cancel-reprocess').addEventListener('click', () => reprocessDialog.close());
+    reprocessForm.addEventListener('submit', submitReprocess);
 
     function submitFile(file) {
       if (!file) return;

@@ -23,6 +23,18 @@ class ContractNotReadyError(RuntimeError):
         super().__init__(f"contract {record.contract_id} is {record.status}")
 
 
+class ContractReprocessNotAllowedError(RuntimeError):
+    def __init__(self, record: ContractRecord):
+        self.record = record
+        super().__init__(
+            f"contract {record.contract_id} cannot reprocess from {record.status}"
+        )
+
+
+class ContractRawContentNotFoundError(FileNotFoundError):
+    pass
+
+
 class ContractService:
     def __init__(
         self,
@@ -67,6 +79,21 @@ class ContractService:
     def list_contracts(self) -> list[ContractRecord]:
         return self.repository.list()
 
+    def reprocess_contract(self, contract_id: str, mode: str) -> ContractRecord:
+        if mode not in {"reuse_existing", "from_scratch"}:
+            raise ValueError(f"unsupported reprocess mode: {mode}")
+
+        contract = self.repository.get(contract_id)
+        if contract is None:
+            raise ContractNotFoundError(contract_id)
+        if contract.status not in {"ready", "failed"}:
+            raise ContractReprocessNotAllowedError(contract)
+        if mode == "reuse_existing":
+            raw_path = Path(contract.storage_dir) / "raw_content_list.json"
+            if not raw_path.is_file():
+                raise ContractRawContentNotFoundError(str(raw_path))
+        return self.repository.update_status(contract_id, "queued")
+
     def ask(self, contract_id: str, question: str, debug: bool = False) -> dict[str, Any]:
         contract = self.repository.get(contract_id)
         if contract is None:
@@ -95,6 +122,12 @@ class ContractService:
 
     def default_evaluation_cases(self):
         return self.evaluation_service.default_cases()
+
+    def list_source_object_entries(self, contract_id: str):
+        return self.evaluation_service.list_source_object_entries(contract_id)
+
+    def list_retrieval_context_entries(self, contract_id: str):
+        return self.evaluation_service.list_retrieval_context_entries(contract_id)
 
     def save_evaluation_cases(self, contract_id: str, entries):
         return self.evaluation_service.save_cases(contract_id, entries)

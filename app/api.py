@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+import mimetypes
 from pathlib import Path
-from typing import Any
+from pathlib import PurePosixPath
+from typing import Any, Literal
 
 from fastapi import (
     BackgroundTasks,
@@ -13,7 +15,7 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
 
@@ -24,16 +26,23 @@ from app.evaluation_service import (
     EvaluationCaseNotFoundError,
     EvaluationContractNotFoundError,
     EvaluationContractNotReadyError,
+    EvaluationMetadataInvalidError,
+    EvaluationMetadataNotFoundError,
+    EvaluationRetrievalContextInvalidError,
+    EvaluationRetrievalContextNotFoundError,
     EvaluationStaleError,
 )
 from app.index_manager import IndexManager
 from app.markdown import render_markdown
 from app.pipeline import ContractProcessor
 from app.service import (
+    ContractRawContentNotFoundError,
     ContractNotFoundError,
     ContractNotReadyError,
+    ContractReprocessNotAllowedError,
     ContractService,
 )
+from app.status import status_label
 
 
 logger = logging.getLogger(__name__)
@@ -50,6 +59,10 @@ class ChatRequest(BaseModel):
         if not value:
             raise ValueError("question must not be blank")
         return value
+
+
+class ReprocessRequest(BaseModel):
+    mode: Literal["reuse_existing", "from_scratch"]
 
 
 def build_default_service(settings: Settings) -> ContractService:
@@ -82,7 +95,9 @@ def create_app(
     templates = Jinja2Templates(
         directory=str(Path(__file__).resolve().parent / "templates")
     )
+    templates.env.policies["json.dumps_kwargs"]["ensure_ascii"] = False
     templates.env.filters["markdown"] = render_markdown
+    templates.env.filters["status_label"] = status_label
 
     def render_dashboard(
         request: Request,
@@ -155,7 +170,7 @@ def create_app(
                 contract_id,
                 question=question,
                 debug=debug,
-                error=f"合同当前状态为 {exc.record.status}，请等待入库完成。",
+                error=f"合同当前状态为 {status_label(exc.record.status)}，请等待入库完成。",
             )
         except FileNotFoundError as exc:
             logger.exception("persisted index unavailable for %s", contract_id)
@@ -213,6 +228,7 @@ def create_app(
         run_id: str | None = None,
         error: str | None = None,
         submitted_rows: list[dict[str, Any]] | None = None,
+        status_code: int = 200,
     ) -> HTMLResponse:
         selected_contract = active_service.get_contract(contract_id)
         if selected_contract is None:
@@ -257,11 +273,12 @@ def create_app(
                 raise HTTPException(status_code=404, detail="run not found") from exc
 
         if selected_contract.status != "ready" and error is None:
-            error = f"合同当前状态为 {selected_contract.status}，完成入库后才能进行评测。"
+            error = f"合同当前状态为 {status_label(selected_contract.status)}，完成入库后才能进行评测。"
 
         return templates.TemplateResponse(
             request=request,
             name="evaluation.html",
+            status_code=status_code,
             context={
                 "selected_contract": selected_contract,
                 "evaluation_rows": rows,
@@ -271,12 +288,94 @@ def create_app(
             },
         )
 
+    def render_metadata_page(
+        request: Request,
+        contract_id: str,
+    ) -> HTMLResponse:
+        selected_contract = active_service.get_contract(contract_id)
+        if selected_contract is None:
+            raise HTTPException(status_code=404, detail="contract not found")
+
+        try:
+            source_objects = active_service.list_source_object_entries(
+                contract_id
+            )
+        except EvaluationContractNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="contract not found") from exc
+        except EvaluationContractNotReadyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except EvaluationMetadataNotFoundError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail="merged_content_list.json not found",
+            ) from exc
+        except EvaluationMetadataInvalidError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        return templates.TemplateResponse(
+            request=request,
+            name="metadata.html",
+            context={
+                "selected_contract": selected_contract,
+                "source_objects": source_objects,
+            },
+        )
+
+    def render_retrieval_context_page(
+        request: Request,
+        contract_id: str,
+    ) -> HTMLResponse:
+        selected_contract = active_service.get_contract(contract_id)
+        if selected_contract is None:
+            raise HTTPException(status_code=404, detail="contract not found")
+
+        try:
+            context_entries = active_service.list_retrieval_context_entries(
+                contract_id
+            )
+        except EvaluationContractNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="contract not found") from exc
+        except EvaluationContractNotReadyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except EvaluationRetrievalContextNotFoundError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail="retrieval_context.json not found",
+            ) from exc
+        except EvaluationRetrievalContextInvalidError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        return templates.TemplateResponse(
+            request=request,
+            name="retrieval_context.html",
+            context={
+                "selected_contract": selected_contract,
+                "context_entries": context_entries,
+            },
+        )
+
     def evaluation_error_message(exc: Exception) -> str:
         if isinstance(exc, EvaluationStaleError):
             return str(exc)
         if isinstance(exc, ValueError):
             return str(exc)
+        if isinstance(exc, EvaluationContractNotReadyError):
+            return (
+                f"合同当前状态为 {status_label(exc.record.status)}，没有可用的索引版本，"
+                "请重新入库后再试。"
+            )
+        if isinstance(exc, EvaluationContractNotFoundError):
+            return "合同不存在。"
         return "评测操作失败，请稍后重试。"
+
+    def evaluation_error_status_code(exc: Exception) -> int:
+        if isinstance(exc, EvaluationContractNotFoundError):
+            return 404
+        if isinstance(exc, (EvaluationContractNotReadyError, EvaluationStaleError)):
+            return 409
+        if isinstance(exc, ValueError):
+            return 400
+        return 500
 
     @application.post("/api/contracts", status_code=202)
     async def upload_contract(
@@ -300,12 +399,56 @@ def create_app(
             for record in active_service.list_contracts()
         ]
 
+    @application.post("/api/contracts/{contract_id}/reprocess", status_code=202)
+    def reprocess_contract(
+        contract_id: str,
+        payload: ReprocessRequest,
+        background_tasks: BackgroundTasks,
+    ) -> dict[str, Any]:
+        try:
+            record = active_service.reprocess_contract(contract_id, payload.mode)
+        except ContractNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="contract not found") from exc
+        except ContractReprocessNotAllowedError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ContractRawContentNotFoundError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="已有解析结果不存在，请选择“从头解析合同”",
+            ) from exc
+        background_tasks.add_task(
+            active_service.processor.process,
+            record.contract_id,
+            mode=payload.mode,
+        )
+        return _record_payload(record)
+
     @application.get("/api/contracts/{contract_id}")
     def get_contract(contract_id: str) -> dict[str, Any]:
         record = active_service.get_contract(contract_id)
         if record is None:
             raise HTTPException(status_code=404, detail="contract not found")
         return _record_payload(record)
+
+    @application.get("/contracts/{contract_id}/images/{img_path:path}")
+    def contract_image(contract_id: str, img_path: str) -> FileResponse:
+        """Serve only image assets below the selected contract directory."""
+
+        record = active_service.get_contract(contract_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="contract not found")
+
+        reference = PurePosixPath(img_path.replace("\\", "/"))
+        if reference.is_absolute() or ".." in reference.parts:
+            raise HTTPException(status_code=404, detail="image not found")
+        target_root = Path(record.storage_dir).expanduser().resolve()
+        target = (target_root / Path(*reference.parts)).resolve()
+        if not target.is_relative_to(target_root) or not target.is_file():
+            raise HTTPException(status_code=404, detail="image not found")
+        media_type = mimetypes.guess_type(target.name)[0]
+        if media_type not in {"image/jpeg", "image/png", "image/webp", "image/gif"}:
+            raise HTTPException(status_code=404, detail="image not found")
+        return FileResponse(target, media_type=media_type)
 
     @application.get(
         "/api/contracts/{contract_id}/evaluation/runs/{run_id}"
@@ -384,6 +527,20 @@ def create_app(
     ) -> HTMLResponse:
         return render_evaluation_page(request, contract_id, run_id=run_id)
 
+    @application.get(
+        "/contracts/{contract_id}/evaluation/metadata",
+        response_class=HTMLResponse,
+    )
+    def metadata_page(request: Request, contract_id: str) -> HTMLResponse:
+        return render_metadata_page(request, contract_id)
+
+    @application.get(
+        "/contracts/{contract_id}/evaluation/retrieval-context",
+        response_class=HTMLResponse,
+    )
+    def retrieval_context_page(request: Request, contract_id: str) -> HTMLResponse:
+        return render_retrieval_context_page(request, contract_id)
+
     @application.post(
         "/contracts/{contract_id}/evaluation/config",
         response_class=HTMLResponse,
@@ -449,6 +606,7 @@ def create_app(
                 contract_id,
                 error=evaluation_error_message(exc),
                 submitted_rows=submitted_rows,
+                status_code=evaluation_error_status_code(exc),
             )
 
     @application.post(

@@ -58,6 +58,34 @@ class AppAPITest(TestCase):
             self.assertTrue(Path(payload["storage_dir"]).joinpath("source.pdf").is_file())
             service.processor.process.assert_called_once_with(payload["contract_id"])
 
+    def test_reprocess_contract_reuses_existing_parse_and_schedules_processor(self):
+        with TemporaryDirectory() as temp_dir:
+            app, service = self._build(Path(temp_dir))
+            contract_dir = Path(temp_dir) / "contract"
+            contract_dir.mkdir(parents=True)
+            (contract_dir / "raw_content_list.json").write_text("[]", encoding="utf-8")
+            contract = service.repository.create(
+                "contract.pdf",
+                contract_dir,
+            )
+            service.repository.update_status(
+                contract.contract_id,
+                "ready",
+                index_version="index-v1",
+            )
+
+            response = TestClient(app).post(
+                f"/api/contracts/{contract.contract_id}/reprocess",
+                json={"mode": "reuse_existing"},
+            )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["status"], "queued")
+        service.processor.process.assert_called_once_with(
+            contract.contract_id,
+            mode="reuse_existing",
+        )
+
     def test_chat_returns_answer_from_service(self):
         with TemporaryDirectory() as temp_dir:
             app, service = self._build(Path(temp_dir))

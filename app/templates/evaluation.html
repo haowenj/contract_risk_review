@@ -135,6 +135,29 @@
       white-space: pre-wrap;
     }
     .node small { display: block; margin-bottom: 4px; color: #5f7087; }
+    .image-evidence {
+      margin-top: 7px;
+      padding: 9px;
+      border-radius: 8px;
+      background: #f5f8fb;
+      overflow-wrap: anywhere;
+    }
+    .image-evidence img {
+      display: block;
+      max-width: min(320px, 100%);
+      max-height: 210px;
+      margin-top: 7px;
+      border: 1px solid #d9e2ec;
+      border-radius: 6px;
+      object-fit: contain;
+    }
+    .image-evidence pre {
+      margin: 7px 0 0;
+      padding: 8px;
+      background: white;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
     .answer {
       padding: 13px;
       border-radius: 8px;
@@ -154,6 +177,19 @@
     }
   </style>
 </head>
+{% macro image_evidence(node) %}
+  {% if node.node_type is defined and node.node_type == "image" %}
+    <div class="image-evidence">
+      <strong>图片证据 · {{ node.image_type or "未分类" }}</strong>
+      {% if node.img_path is defined %}
+        <div>原始图片：{{ node.img_path }}</div>
+        <img src="/contracts/{{ selected_contract.contract_id }}/images/{{ node.img_path }}" alt="合同图片证据" loading="lazy">
+      {% endif %}
+      {% if node.verification_status is defined %}<div>校验状态（verification_status）：{{ node.verification_status }}</div>{% endif %}
+      {% if node.structured_data is defined %}<pre>{{ node.structured_data | tojson(indent=2) }}</pre>{% endif %}
+    </div>
+  {% endif %}
+{% endmacro %}
 <body data-run-id="{{ run_id or '' }}">
   <header class="topbar">
     <strong>合同风险审阅 · Evaluation</strong>
@@ -168,7 +204,7 @@
     <section class="card">
       <h1>{{ selected_contract.filename }}</h1>
       <p class="meta">
-        状态：{{ selected_contract.status }}
+        状态：{{ selected_contract.status|status_label }}
         {% if selected_contract.index_version %} · index version={{ selected_contract.index_version }}{% endif %}
       </p>
 
@@ -177,6 +213,10 @@
       {% if selected_contract.status == "ready" %}
         <h2>评测集配置</h2>
         <p class="hint">正确 Node ID 使用 source_object_index 数字，可用逗号、空格或换行分隔。首次进入会预填脚本中的默认问题，保存后才能运行。</p>
+        <div class="toolbar">
+          <a class="button" href="/contracts/{{ selected_contract.contract_id }}/evaluation/metadata">查看解析对象</a>
+          <a class="button" href="/contracts/{{ selected_contract.contract_id }}/evaluation/retrieval-context">查看检索上下文</a>
+        </div>
         <form id="cases-form" action="/contracts/{{ selected_contract.contract_id }}/evaluation/config" method="post">
           <div id="case-list">
             {% for row in evaluation_rows %}
@@ -217,40 +257,52 @@
     <section class="card" id="results">
       <h2>测试结果</h2>
       {% if latest_run %}
-        <div class="run-status">Run {{ latest_run.run_id }} · 状态：<strong>{{ latest_run.status }}</strong>{% if latest_run.error_message %} · {{ latest_run.error_message }}{% endif %}</div>
-        {% for item in latest_run.items %}
+        <div class="run-status">Run {{ latest_run.run_id }} · 状态：<strong data-status="{{ latest_run.status }}">{{ latest_run.status|status_label }}</strong>{% if latest_run.error_message %} · {{ latest_run.error_message }}{% endif %}</div>
+        {% for item in latest_run["items"] %}
           {% set result = item.result %}
           <article class="result-card">
             <h3>{{ loop.index }}. {{ item.question }}</h3>
             <div class="ids"><strong>正确 Node ID：</strong>{{ item.expected_source_object_indices|join(', ') if item.expected_source_object_indices else '未配置' }}</div>
-            <div class="ids"><strong>Vector Top10 实际 Node ID：</strong>{{ result.vector_source_object_indices|join(', ') }}</div>
-            <div class="ids"><strong>Rerank Top10 实际 Node ID：</strong>{{ result.rerank_source_object_indices|join(', ') }}</div>
-            <div class="metrics">
-              <div class="metric"><small>Vector Recall@5</small><strong>{{ result.vector_recall_at_5 if result.vector_recall_at_5 is not none else '—' }}</strong></div>
-              <div class="metric"><small>Vector Recall@10</small><strong>{{ result.vector_recall_at_10 if result.vector_recall_at_10 is not none else '—' }}</strong></div>
-              <div class="metric"><small>Rerank Recall@5</small><strong>{{ result.rerank_recall_at_5 if result.rerank_recall_at_5 is not none else '—' }}</strong></div>
-              <div class="metric"><small>Rerank Recall@10</small><strong>{{ result.rerank_recall_at_10 if result.rerank_recall_at_10 is not none else '—' }}</strong></div>
-            </div>
-            <details>
-              <summary>Vector Top10 候选</summary>
-              {% for node in result.vector_results %}
-                <div class="node"><small>Node {{ node.source_object_index }} · score={{ node.score if node.score is defined else '—' }}{% if node.page_idx is defined %} · page={{ node.page_idx }}{% endif %}</small>{{ node.text }}</div>
-              {% else %}<p class="hint">没有 Vector 候选。</p>{% endfor %}
-            </details>
-            <details>
-              <summary>Rerank Top10 候选</summary>
-              {% for node in result.reranked_results %}
-                <div class="node"><small>Node {{ node.source_object_index }} · score={{ node.score if node.score is defined else '—' }}{% if node.page_idx is defined %} · page={{ node.page_idx }}{% endif %}</small>{{ node.text }}</div>
-              {% else %}<p class="hint">没有 Rerank 候选。</p>{% endfor %}
-            </details>
-            <details open>
-              <summary>Selected Evidence</summary>
-              {% for node in result.selected_nodes %}
-                <div class="node"><small>Node {{ node.source_object_index }}{% if node.page_idx is defined %} · page={{ node.page_idx }}{% endif %}</small>{{ node.text }}</div>
-              {% else %}<p class="hint">没有筛选出证据。</p>{% endfor %}
-            </details>
-            <h3>最终回答</h3>
-            <div class="answer">{{ result.llm_summary.answer|markdown }}</div>
+            {% if result and result.llm_summary is defined %}
+              <div class="ids"><strong>Vector Top10 实际 Node ID：</strong>{{ result.vector_source_object_indices|join(', ') }}</div>
+              <div class="ids"><strong>Rerank Top10 实际 Node ID：</strong>{{ result.rerank_source_object_indices|join(', ') }}</div>
+              <div class="metrics">
+                <div class="metric"><small>Vector Recall@5</small><strong>{{ result.vector_recall_at_5 if result.vector_recall_at_5 is not none else '—' }}</strong></div>
+                <div class="metric"><small>Vector Recall@10</small><strong>{{ result.vector_recall_at_10 if result.vector_recall_at_10 is not none else '—' }}</strong></div>
+                <div class="metric"><small>Rerank Recall@5</small><strong>{{ result.rerank_recall_at_5 if result.rerank_recall_at_5 is not none else '—' }}</strong></div>
+                <div class="metric"><small>Rerank Recall@10</small><strong>{{ result.rerank_recall_at_10 if result.rerank_recall_at_10 is not none else '—' }}</strong></div>
+              </div>
+              <details>
+                <summary>Vector Top10 候选</summary>
+                {% for node in result.vector_results %}
+                  <div class="node"><small>Node {{ node.source_object_index }} · type={{ node.node_type if node.node_type is defined else 'text' }} · score={{ node.score if node.score is defined else '—' }}{% if node.page_idx is defined %} · page={{ node.page_idx }}{% endif %}</small>{{ image_evidence(node) }}{{ node.evidence_text if node.evidence_text is defined else node.text }}</div>
+                {% else %}<p class="hint">没有 Vector 候选。</p>{% endfor %}
+              </details>
+              <details>
+                <summary>Rerank Top10 候选</summary>
+                {% for node in result.reranked_results %}
+                  <div class="node"><small>Node {{ node.source_object_index }} · type={{ node.node_type if node.node_type is defined else 'text' }} · score={{ node.score if node.score is defined else '—' }}{% if node.page_idx is defined %} · page={{ node.page_idx }}{% endif %}</small>{{ image_evidence(node) }}{{ node.evidence_text if node.evidence_text is defined else node.text }}</div>
+                {% else %}<p class="hint">没有 Rerank 候选。</p>{% endfor %}
+              </details>
+              <details open>
+                <summary>Selected Evidence</summary>
+                {% for node in result.selected_nodes %}
+                  <div class="node"><small>Node {{ node.source_object_index }} · type={{ node.node_type if node.node_type is defined else 'text' }}{% if node.page_idx is defined %} · page={{ node.page_idx }}{% endif %}</small>{{ image_evidence(node) }}{{ node.evidence_text if node.evidence_text is defined else node.text }}</div>
+                {% else %}<p class="hint">没有筛选出证据。</p>{% endfor %}
+              </details>
+              <h3>最终回答</h3>
+              <div class="answer">{{ result.llm_summary.answer|markdown }}</div>
+            {% else %}
+              <div class="empty">
+                {% if latest_run.status in ['queued', 'processing'] %}
+                  本题正在测试，等待测试完成后显示结果。
+                {% elif latest_run.status == 'failed' %}
+                  本题未产生结果。
+                {% else %}
+                  本题暂无可展示结果。
+                {% endif %}
+              </div>
+            {% endif %}
           </article>
         {% else %}
           <div class="empty">这次运行还没有保存题目结果。</div>
@@ -306,7 +358,7 @@
       }
       window.location.reload();
     }
-    if (runId && document.querySelector('.run-status strong')?.textContent.trim() !== 'ready' && document.querySelector('.run-status strong')?.textContent.trim() !== 'failed') {
+    if (runId && !['ready', 'failed'].includes(document.querySelector('.run-status strong')?.dataset.status)) {
       pollRun();
     }
   </script>

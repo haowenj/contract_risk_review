@@ -66,6 +66,14 @@ class ContractRepository:
                 connection.execute(
                     "ALTER TABLE contracts ADD COLUMN index_version TEXT"
                 )
+            connection.execute(
+                """
+                UPDATE contracts
+                SET index_version = 'legacy-' || contract_id
+                WHERE status = 'ready'
+                  AND (index_version IS NULL OR index_version = '')
+                """
+            )
 
     @staticmethod
     def _now() -> str:

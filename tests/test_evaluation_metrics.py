@@ -34,6 +34,36 @@ def table_result_for(source_object_index: int, text: str, score: float = 0.9):
     return SimpleNamespace(node=node, score=score)
 
 
+def image_result_for(source_object_index: int, text: str, score: float = 0.9):
+    node = SimpleNamespace(
+        node_id=f"image-node-{source_object_index}",
+        text=text,
+        metadata={
+            "node_type": "image",
+            "source_object_index": source_object_index,
+            "page_idx": 4,
+            "bbox": [1, 2, 3, 4],
+            "img_path": "images/account.jpg",
+            "image_type": "bank_account",
+            "structured_data": {
+                "account_name": "甲公司",
+                "account_number": "110914414810101",
+                "bank_name": "甲银行",
+                "bank_branch": None,
+            },
+            "ocr_text": "账号 110914414810101",
+            "ocr_status": "ready",
+            "verification_status": "verified",
+            "verification_details": {
+                "account_number": {"status": "verified"}
+            },
+            "image_processing_status": "ready",
+            "retrieval_context": "开户资料章节",
+        },
+    )
+    return SimpleNamespace(node=node, score=score)
+
+
 def test_evaluation_metrics_compare_gold_only_after_pipeline_runs():
     result = {
         "query": "问题",
@@ -113,3 +143,28 @@ def test_serialize_pipeline_result_keeps_original_table_information():
     assert evidence["table_body"].startswith("<table>")
     assert evidence["table_caption"] == ["付款计划"]
     assert evidence["table_footnote"] == ["以到账为准"]
+
+
+def test_serialize_pipeline_result_keeps_image_reference_and_verification():
+    image_result = image_result_for(12, "银行账号：110914414810101")
+    result = {
+        "query": "账号是什么？",
+        "vector_results": [image_result],
+        "reranked_results": [image_result],
+        "selected_indices": [12],
+        "selected_nodes": [image_result],
+        "llm_summary": {"answer": "账号为110914414810101。", "evidence_indices": [12]},
+    }
+
+    serialized = serialize_pipeline_result(result)
+
+    for stage in ("vector_results", "reranked_results", "selected_nodes"):
+        evidence = serialized[stage][0]
+        assert evidence["node_type"] == "image"
+        assert evidence["source_object_index"] == 12
+        assert evidence["page_idx"] == 4
+        assert evidence["img_path"] == "images/account.jpg"
+        assert evidence["image_type"] == "bank_account"
+        assert evidence["structured_data"]["account_number"] == "110914414810101"
+        assert evidence["verification_status"] == "verified"
+        assert evidence["text"] == "银行账号：110914414810101"

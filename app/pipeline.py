@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from llama_index.core import VectorStoreIndex
 
 from app.config import Settings
 from app.db import ContractRepository
 from app.index_manager import IndexManager
+from app.image_ingestion import ContractImageIngestionService, write_json_atomic
 from app.models import ContractRecord
 from clean_mineru_data import clean_content_list_file
 from merge_cross_page_paragraphs import merge_content_list_file
@@ -18,6 +20,7 @@ from mineru_raw_parse import run_parse
 
 
 logger = logging.getLogger(__name__)
+ProcessMode = Literal["reuse_existing", "from_scratch"]
 
 
 def generate_contexts(objects: list[dict[str, Any]]) -> dict[int, str | None]:
@@ -51,6 +54,31 @@ def get_embedding_model() -> Any:
     return embedding_model
 
 
+def build_default_image_ingestion_service(
+    settings: Settings,
+) -> ContractImageIngestionService:
+    """Construct the configured VL and MinerU OCR adapters on demand."""
+
+    from app.image_ocr import MinerUImageOCRService
+    from app.image_understanding import ImageUnderstandingService
+
+    vision_service = ImageUnderstandingService(
+        model_name=settings.image_vision_model,
+        api_key=os.environ.get("LLM_API_KEY"),
+        base_url=os.environ.get("LLM_BASE_URL"),
+        timeout_seconds=settings.image_vision_timeout_seconds,
+    )
+    ocr_service = MinerUImageOCRService(
+        svr_url=settings.mineru_url,
+        backend=settings.mineru_backend,
+        server_url=settings.mineru_server_url,
+    )
+    return ContractImageIngestionService(
+        vision_service=vision_service,
+        ocr_service=ocr_service,
+    )
+
+
 class ContractProcessor:
     def __init__(
         self,
@@ -59,28 +87,42 @@ class ContractProcessor:
         index_manager: IndexManager,
         *,
         embedding_model: Any | None = None,
+        image_ingestion_service: ContractImageIngestionService | None = None,
     ):
         self.repository = repository
         self.settings = settings
         self.index_manager = index_manager
         self.embedding_model = embedding_model
+        self.image_ingestion_service = image_ingestion_service
 
-    def process(self, contract_id: str) -> ContractRecord:
+    def process(
+        self,
+        contract_id: str,
+        *,
+        mode: ProcessMode = "from_scratch",
+    ) -> ContractRecord:
         contract = self.repository.get(contract_id)
         if contract is None:
             raise KeyError(contract_id)
+        if mode not in {"reuse_existing", "from_scratch"}:
+            raise ValueError(f"unsupported process mode: {mode}")
 
         self.repository.update_status(contract_id, "processing")
         self.index_manager.clear(contract_id)
         try:
             paths = self._paths(contract)
-            run_parse(
-                paths["source"],
-                paths["raw"],
-                svr_url=self.settings.mineru_url,
-                backend=self.settings.mineru_backend,
-                server_url=self.settings.mineru_server_url,
-            )
+            if mode == "from_scratch":
+                run_parse(
+                    paths["source"],
+                    paths["raw"],
+                    svr_url=self.settings.mineru_url,
+                    backend=self.settings.mineru_backend,
+                    server_url=self.settings.mineru_server_url,
+                )
+            elif not paths["raw"].is_file():
+                raise FileNotFoundError(
+                    f"raw_content_list.json not found: {paths['raw']}"
+                )
             clean_content_list_file(paths["raw"], paths["cleaned"])
             merge_content_list_file(
                 paths["cleaned"],
@@ -91,6 +133,20 @@ class ContractProcessor:
             objects = json.loads(paths["merged"].read_text(encoding="utf-8"))
             if not isinstance(objects, list):
                 raise ValueError("merged content list must contain a JSON list")
+
+            if any(
+                isinstance(obj, dict) and obj.get("type") == "image"
+                for obj in objects
+            ):
+                image_service = (
+                    self.image_ingestion_service
+                    or build_default_image_ingestion_service(self.settings)
+                )
+                objects = image_service.enrich_images(
+                    objects,
+                    storage_dir=Path(contract.storage_dir),
+                )
+                write_json_atomic(paths["merged"], objects)
 
             contexts = generate_contexts(objects)
             save_retrieval_contexts(contexts, paths["context"])

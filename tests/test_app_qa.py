@@ -44,6 +44,36 @@ def table_result_for(index: int, text: str, score: float = 0.8):
     return SimpleNamespace(node=node, score=score)
 
 
+def image_result_for(index: int, text: str, score: float = 0.9):
+    node = SimpleNamespace(
+        node_id=f"image-node-{index}",
+        text=text,
+        metadata={
+            "node_type": "image",
+            "source_object_index": index,
+            "page_idx": 4,
+            "bbox": [1, 2, 3, 4],
+            "img_path": "images/account.jpg",
+            "image_type": "bank_account",
+            "structured_data": {
+                "account_name": "甲公司",
+                "account_number": "110914414810101",
+                "bank_name": "甲银行",
+                "bank_branch": None,
+            },
+            "ocr_text": "账号 110914414810101",
+            "ocr_status": "ready",
+            "verification_status": "verified",
+            "verification_details": {
+                "account_number": {"status": "verified"}
+            },
+            "image_processing_status": "ready",
+            "retrieval_context": "开户资料章节",
+        },
+    )
+    return SimpleNamespace(node=node, score=score)
+
+
 class FakeRetriever:
     def __init__(self, results):
         self.results = results
@@ -122,3 +152,23 @@ class AppQATest(TestCase):
         self.assertEqual(evidence["table_caption"], ["付款计划"])
         self.assertEqual(evidence["table_footnote"], ["以到账为准"])
         self.assertEqual(evidence["bbox"], [1, 2, 3, 4])
+
+    def test_answer_question_serializes_image_reference_and_verification(self):
+        result = answer_question(
+            FakeIndex([image_result_for(12, "银行账号：110914414810101")]),
+            "账号是什么？",
+            debug=True,
+            reranker=FakeReranker(),
+            selector_llm=FakeLLM({"evidence_indices": [12]}),
+            answer_llm=FakeLLM({"answer": "账号为110914414810101。"}),
+        )
+
+        evidence = result["evidence"][0]
+        self.assertEqual(evidence["node_type"], "image")
+        self.assertEqual(evidence["source_object_index"], 12)
+        self.assertEqual(evidence["img_path"], "images/account.jpg")
+        self.assertEqual(evidence["image_type"], "bank_account")
+        self.assertEqual(evidence["structured_data"]["account_number"], "110914414810101")
+        self.assertEqual(evidence["verification_status"], "verified")
+        self.assertEqual(evidence["evidence_text"], "银行账号：110914414810101")
+        self.assertEqual(result["debug"]["rerank_top10"][0]["img_path"], "images/account.jpg")
