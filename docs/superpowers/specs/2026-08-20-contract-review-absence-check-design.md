@@ -43,7 +43,7 @@ current_retrieval_query: str
 retrieved_evidence: list[Evidence]
 absence_keywords: list[str]
 absence_candidates: list[Evidence]
-absence_candidate_count: int
+absence_candidate_count: int | None
 current_decision: RiskDecision | None
 ```
 
@@ -54,7 +54,7 @@ current_decision: RiskDecision | None
 - `retrieved_evidence`：当前 ReviewItem 累积的 RAG Evidence，按 `source_object_index` 去重。
 - `absence_keywords`：第一次改写查询时同时生成、供必要时全文扫描的关键词。
 - `absence_candidates`：确定性全文扫描得到的真实候选 Evidence。
-- `absence_candidate_count`：应用候选返回上限之前命中的唯一 source object 总数。
+- `absence_candidate_count`：`None` 表示尚未执行全文扫描；整数表示应用候选返回上限之前命中的唯一 source object 总数，其中 `0` 明确表示已完成扫描且没有候选。
 - `current_decision`：当前 ReviewItem 尚未封装为 `ReviewResult` 的风险判断。
 
 `review_results` 继续使用 reducer 累积。每个 ReviewItem 开始时重置新增的单项字段，不改变合同级字段和最终返回结构。
