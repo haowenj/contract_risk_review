@@ -5,6 +5,7 @@ from typing import Any
 
 from app.contract_review.absence import scan_source_objects
 from app.contract_review.prompts import (
+    build_absence_result_prompt,
     build_parse_review_rules_prompt,
     build_retrieval_query_rewrite_prompt,
     build_review_item_prompt,
@@ -264,6 +265,50 @@ class ContractReviewNodes:
             "absence_candidates": candidates,
             "absence_candidate_count": scan.candidate_count,
         }
+
+    def absence_result(
+        self,
+        state: ContractReviewState,
+    ) -> dict[str, Any]:
+        item = state["review_items"][state["current_item_index"]]
+        try:
+            if state["absence_candidate_count"] != 0:
+                raise ValueError("absence_result requires zero scan candidates")
+            response = self.review_llm.invoke(
+                build_absence_result_prompt(
+                    item,
+                    keywords=state["absence_keywords"],
+                )
+            )
+            decision = parse_llm_response(response, RiskDecision)
+            if decision.evidence_status != "absence_verified":
+                raise ValueError("absence_result must return absence_verified")
+            forbidden = "合同肯定没有"
+            if any(
+                forbidden in value
+                for value in (
+                    decision.finding,
+                    decision.risk_description,
+                    decision.suggestion,
+                )
+            ):
+                raise ValueError("absence_result used an absolute absence claim")
+            if "基于当前合同全文解析结果" not in decision.finding:
+                raise ValueError(
+                    "absence_result finding lacks parsed-content scope"
+                )
+            self._emit(
+                "absence_confirmed",
+                {
+                    "item_id": item.id,
+                    "keywords": state["absence_keywords"],
+                    "candidate_count": 0,
+                    "decision": decision.model_dump(mode="json"),
+                },
+            )
+        except Exception as exc:
+            raise RuntimeError(f"absence_result {item.id} failed") from exc
+        return {"current_decision": decision}
 
     def finalize_review_item(
         self,

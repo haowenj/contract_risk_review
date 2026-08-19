@@ -19,7 +19,7 @@ def route_after_retrieve(state: ContractReviewState) -> str:
 def route_after_absence_check(state: ContractReviewState) -> str:
     if state["absence_candidates"]:
         return "risk_decision"
-    return "insufficient_result"
+    return "absence_result"
 
 
 def route_after_risk_decision(state: ContractReviewState) -> str:
@@ -47,6 +47,7 @@ def build_contract_review_graph(nodes: ContractReviewNodes) -> Any:
     builder.add_node("rewrite_query", nodes.rewrite_query)
     builder.add_node("risk_decision", nodes.risk_decision)
     builder.add_node("absence_check", nodes.absence_check)
+    builder.add_node("absence_result", nodes.absence_result)
     builder.add_node("insufficient_result", nodes.insufficient_result)
     builder.add_node("finalize_review_item", nodes.finalize_review_item)
     builder.add_node("aggregate_results", nodes.aggregate_results)
@@ -68,9 +69,10 @@ def build_contract_review_graph(nodes: ContractReviewNodes) -> Any:
         route_after_absence_check,
         {
             "risk_decision": "risk_decision",
-            "insufficient_result": "insufficient_result",
+            "absence_result": "absence_result",
         },
     )
+    builder.add_edge("absence_result", "finalize_review_item")
     builder.add_conditional_edges(
         "risk_decision",
         route_after_risk_decision,

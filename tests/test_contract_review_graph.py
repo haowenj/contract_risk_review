@@ -84,6 +84,15 @@ INSUFFICIENT_DECISION = {
     "suggestion": "继续检索乙方权利义务及第三方履约约定。",
 }
 
+ABSENCE_DECISION = {
+    "risk_status": "risk",
+    "risk_level": "medium",
+    "evidence_status": "absence_verified",
+    "finding": "基于当前合同全文解析结果，未发现明确限制乙方分包或转包的条款。",
+    "risk_description": "两次语义检索及全文关键词核验均未发现对应约定。",
+    "suggestion": "建议补充未经书面同意不得分包或转包的明确条款。",
+}
+
 
 class FakeLLM:
     def __init__(self, *payloads):
@@ -338,8 +347,8 @@ def test_explicit_graph_retries_insufficient_decision_and_merges_unique_evidence
     assert [value.source_object_index for value in result.evidence] == [27, 99]
 
 
-def test_explicit_graph_stops_after_second_empty_retrieval_without_review_llm():
-    review_llm = FakeLLM()
+def test_explicit_graph_stops_after_second_empty_retrieval_and_runs_absence_decision():
+    review_llm = FakeLLM(ABSENCE_DECISION)
     query_rewrite_llm = FakeLLM(QUERY_REWRITE)
     contract_service = FakeContractService([], [])
     nodes = ContractReviewNodes(
@@ -353,10 +362,10 @@ def test_explicit_graph_stops_after_second_empty_retrieval_without_review_llm():
     result = final_state["review_results"][0]
     assert len(contract_service.searches) == 2
     assert len(query_rewrite_llm.prompts) == 1
-    assert review_llm.prompts == []
-    assert result.risk_status == "needs_review"
-    assert result.risk_level is None
-    assert result.evidence_status == "insufficient"
+    assert len(review_llm.prompts) == 1
+    assert result.risk_status == "risk"
+    assert result.risk_level == "medium"
+    assert result.evidence_status == "absence_verified"
     assert result.evidence == []
     assert "合同没有约定" not in result.finding
 
@@ -406,6 +415,86 @@ def test_graph_scans_after_two_empty_rag_results_and_reviews_absence_candidate()
     assert [event for event, _ in events].count("absence_check_started") == 1
     assert [event for event, _ in events].count("absence_keywords_generated") == 1
     assert [event for event, _ in events].count("absence_candidates_found") == 1
+
+
+def test_graph_returns_audited_absence_verified_after_two_empty_rag_results():
+    events = []
+    contract_service = FakeContractService(
+        [],
+        [],
+        source_objects=[
+            {"type": "text", "text": "付款与验收条款", "page_idx": 1},
+        ],
+    )
+    nodes = ContractReviewNodes(
+        parse_llm=FakeLLM(ONE_ITEM_PAYLOAD),
+        query_rewrite_llm=FakeLLM(QUERY_REWRITE),
+        review_llm=FakeLLM(ABSENCE_DECISION),
+        contract_service=contract_service,
+        progress_callback=lambda event, payload: events.append((event, payload)),
+    )
+
+    final_state = build_contract_review_graph(nodes).invoke(initial_state())
+
+    result = final_state["review_results"][0]
+    assert len(contract_service.searches) == 2
+    assert result.risk_status == "risk"
+    assert result.risk_level == "medium"
+    assert result.evidence_status == "absence_verified"
+    assert result.evidence == []
+    assert result.absence_check is not None
+    assert result.absence_check.model_dump() == {
+        "keywords": ["分包", "转包", "转委托", "委托第三方"],
+        "candidate_count": 0,
+    }
+    assert "合同肯定没有" not in result.finding
+    assert [event for event, _ in events].count("absence_confirmed") == 1
+
+
+@pytest.mark.parametrize(
+    "invalid_decision",
+    [
+        INSUFFICIENT_DECISION,
+        {
+            **ABSENCE_DECISION,
+            "finding": "合同肯定没有分包限制条款。",
+        },
+        {
+            **ABSENCE_DECISION,
+            "finding": "未发现明确限制乙方分包或转包的条款。",
+        },
+    ],
+)
+def test_absence_result_rejects_invalid_or_absolute_decisions(invalid_decision):
+    nodes = ContractReviewNodes(
+        parse_llm=FakeLLM(ONE_ITEM_PAYLOAD),
+        query_rewrite_llm=FakeLLM(QUERY_REWRITE),
+        review_llm=FakeLLM(invalid_decision),
+        contract_service=FakeContractService([], [], source_objects=[]),
+    )
+
+    with pytest.raises(RuntimeError, match="absence_result item_1 failed") as error:
+        build_contract_review_graph(nodes).invoke(initial_state())
+
+    assert isinstance(error.value.__cause__, ValueError)
+
+
+def test_absence_check_preserves_missing_content_file_failure():
+    nodes = ContractReviewNodes(
+        parse_llm=FakeLLM(ONE_ITEM_PAYLOAD),
+        query_rewrite_llm=FakeLLM(QUERY_REWRITE),
+        review_llm=FakeLLM(ABSENCE_DECISION),
+        contract_service=FakeContractService(
+            [],
+            [],
+            source_objects=FileNotFoundError("merged_content_list.json"),
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="absence_check item_1 failed") as error:
+        build_contract_review_graph(nodes).invoke(initial_state())
+
+    assert isinstance(error.value.__cause__, FileNotFoundError)
 
 
 def test_aggregate_results_counts_all_statuses_without_llm():
