@@ -131,6 +131,67 @@ class RetrievalContextPreprocessTest(TestCase):
         self.assertIn("以到账为准", table_prompt)
         self.assertIn("第四条 付款方式", table_prompt)
 
+    def test_context_generation_uses_image_searchable_text_and_nearby_body(self):
+        llm = RecordingLLM(response="位于开户资料章节的银行账户图片")
+        objects = [
+            {"type": "text", "text": "第五条 开户资料", "text_level": 2},
+            {"type": "text", "text": "以下为乙方收款账户：", "page_idx": 4},
+            {
+                "type": "image",
+                "page_idx": 4,
+                "image_caption": ["收款账户"],
+                "image_footnote": [],
+                "image_type": "bank_account",
+                "structured_data": {
+                    "account_name": "乙方公司",
+                    "account_number": "110914414810101",
+                    "bank_name": "甲银行",
+                    "bank_branch": None,
+                },
+                "verification_status": "verified",
+            },
+            {"type": "text", "text": "转账时请备注合同编号。", "page_idx": 4},
+        ]
+
+        contexts = retrieval_context_preprocess.generate_contexts(
+            objects,
+            llm=llm,
+            concurrency=1,
+        )
+
+        self.assertEqual(contexts[2], "位于开户资料章节的银行账户图片")
+        prompt = llm.prompts[-1]
+        self.assertIn("第五条 开户资料", prompt)
+        self.assertIn("以下为乙方收款账户", prompt)
+        self.assertIn("转账时请备注合同编号", prompt)
+        self.assertIn("110914414810101", prompt)
+
+    def test_empty_or_failed_general_image_has_no_context_entry(self):
+        objects = [
+            {
+                "type": "image",
+                "image_processing_status": "vl_failed",
+                "image_type": None,
+                "structured_data": None,
+            },
+            {
+                "type": "image",
+                "image_type": "general",
+                "structured_data": {
+                    "visible_text": None,
+                    "content_description": "",
+                },
+            },
+        ]
+
+        contexts = retrieval_context_preprocess.generate_contexts(
+            objects,
+            context_generator=lambda *_: "不应调用",
+            concurrency=1,
+        )
+
+        self.assertEqual(contexts, {})
+
     def test_persists_and_loads_context_by_source_object_index(self):
         contexts = {
             111: "位于付款条款相关章节",

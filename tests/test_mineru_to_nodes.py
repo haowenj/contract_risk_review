@@ -103,6 +103,67 @@ class MineruToNodesTest(TestCase):
         )
         self.assertNotIn("table_body", node.get_content(metadata_mode=MetadataMode.EMBED))
 
+    def test_build_nodes_creates_image_node_with_reference_and_searchable_text(self):
+        objects = [
+            {
+                "type": "image",
+                "img_path": "images/account.jpg",
+                "image_type": "bank_account",
+                "structured_data": {
+                    "account_name": "甲公司",
+                    "account_number": "110914414810101",
+                    "bank_name": "甲银行",
+                    "bank_branch": None,
+                },
+                "ocr_text": "账号：110914414810101",
+                "ocr_status": "ready",
+                "verification_status": "verified",
+                "verification_details": {
+                    "account_number": {"status": "verified"}
+                },
+                "image_processing_status": "ready",
+                "page_idx": 4,
+                "bbox": [1, 2, 3, 4],
+            }
+        ]
+
+        node = mineru_to_nodes.build_nodes(
+            objects,
+            retrieval_contexts={0: "位于开户资料章节"},
+        )[0]
+
+        self.assertEqual(node.metadata["node_type"], "image")
+        self.assertEqual(node.metadata["source_object_index"], 0)
+        self.assertEqual(node.metadata["img_path"], "images/account.jpg")
+        self.assertEqual(node.metadata["image_type"], "bank_account")
+        self.assertEqual(node.metadata["verification_status"], "verified")
+        self.assertIn("110914414810101", node.text)
+        embedding_text = node.get_content(metadata_mode=MetadataMode.EMBED)
+        self.assertIn("位于开户资料章节", embedding_text)
+        self.assertIn("110914414810101", embedding_text)
+        self.assertNotIn("images/account.jpg", embedding_text)
+
+    def test_build_nodes_skips_unusable_image_results(self):
+        nodes = mineru_to_nodes.build_nodes(
+            [
+                {
+                    "type": "image",
+                    "image_processing_status": "vl_failed",
+                    "structured_data": None,
+                },
+                {
+                    "type": "image",
+                    "image_type": "general",
+                    "structured_data": {
+                        "visible_text": None,
+                        "content_description": "",
+                    },
+                },
+            ]
+        )
+
+        self.assertEqual(nodes, [])
+
     def test_missing_persisted_context_does_not_trigger_llm_generation(self):
         objects = [{"type": "text", "text": "正文"}]
 

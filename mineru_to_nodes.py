@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from llama_index.core import VectorStoreIndex
 from llama_index.core.schema import MetadataMode, TextNode
 from llama_index.embeddings.openai import OpenAIEmbedding
+from image_searchable_text import image_to_searchable_text
 from table_searchable_text import table_to_searchable_text
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -97,6 +98,7 @@ def build_nodes(
         )
 
         metadata = {
+            "node_type": "text",
             "retrieval_context": retrieval_context,
             "text_level": obj.get("text_level"),
             "page_idx": obj.get("page_idx"),
@@ -164,6 +166,58 @@ def build_nodes(
             TextNode(
                 id_=f"test_hetong_{source_index}",
                 text=table_to_searchable_text(obj),
+                metadata=metadata,
+                excluded_embed_metadata_keys=excluded_embed_metadata_keys,
+            )
+        )
+
+    for source_index, obj in enumerate(objects):
+        if obj.get("type") != "image":
+            continue
+
+        searchable_text = image_to_searchable_text(obj)
+        if not searchable_text:
+            continue
+
+        retrieval_context = (
+            retrieval_contexts.get(source_index)
+            if retrieval_contexts is not None
+            else None
+        )
+        metadata = {
+            "node_type": "image",
+            "retrieval_context": retrieval_context,
+            "source_object_index": source_index,
+            "page_idx": obj.get("page_idx"),
+            "bbox": obj.get("bbox"),
+            "img_path": obj.get("img_path"),
+            "image_type": obj.get("image_type"),
+            "structured_data": obj.get("structured_data"),
+            "ocr_text": obj.get("ocr_text") or "",
+            "ocr_status": obj.get("ocr_status"),
+            "verification_status": obj.get("verification_status"),
+            "verification_details": obj.get("verification_details", {}),
+            "image_processing_status": obj.get("image_processing_status"),
+            "image_schema_version": obj.get("image_schema_version"),
+            "image_model": obj.get("image_model"),
+            "image_caption": obj.get("image_caption"),
+            "image_footnote": obj.get("image_footnote"),
+        }
+        metadata = {
+            key: value
+            for key, value in metadata.items()
+            if value is not None
+        }
+        excluded_embed_metadata_keys = [
+            key
+            for key in metadata
+            if key != "retrieval_context"
+        ]
+
+        nodes.append(
+            TextNode(
+                id_=f"test_hetong_{source_index}",
+                text=searchable_text,
                 metadata=metadata,
                 excluded_embed_metadata_keys=excluded_embed_metadata_keys,
             )

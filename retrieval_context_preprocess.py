@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import sys
 from collections.abc import Callable, Collection, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -15,6 +16,7 @@ from mineru_to_nodes import (
     INPUT_PATH,
     RETRIEVAL_CONTEXT_PATH,
 )
+from image_searchable_text import image_to_searchable_text
 from table_searchable_text import table_to_searchable_text
 
 MAX_RETRIEVAL_CONTEXT_CHARS = 160
@@ -153,6 +155,34 @@ def build_table_context_prompt(
 """
 
 
+def build_image_context_prompt(
+    searchable_text: str,
+    section_path: list[str],
+    nearby_texts: list[str],
+) -> str:
+    section_text = " > ".join(section_path) or "未识别到章节标题"
+    nearby_text = "\n".join(nearby_texts) or "未找到附近正文"
+
+    return f"""你是合同检索预处理器。请为当前合同图片生成一段简短的 retrieval_context。
+
+目标是补充图片在全文中的章节定位、附近正文说明或图片用途。
+只使用下方章节路径、附近正文和图片 searchable_text 中明确提供的信息。
+不得猜测图片类型、字段值、主体关系或附近正文没有说明的事实。
+不要重复图片 searchable_text 已经明确出现的账号、姓名、身份证号码等字段。
+如果没有可安全补充的信息，输出空字符串。
+只输出 retrieval_context，不要输出 Markdown、引号、前缀或解释。
+
+章节路径：
+{section_text}
+
+图片 searchable_text：
+{searchable_text.strip()}
+
+附近正文：
+{nearby_text}
+"""
+
+
 def _normalize_context(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
@@ -278,6 +308,12 @@ def generate_contexts(
             context_generator=context_generator,
             concurrency=concurrency,
         ),
+        **_generate_image_contexts(
+            objects,
+            llm=llm,
+            context_generator=context_generator,
+            concurrency=concurrency,
+        ),
     }
 
 
@@ -311,6 +347,104 @@ def _generate_table_contexts(
     return {
         source_index: contexts[table_index]
         for table_index, (source_index, _) in enumerate(table_objects)
+    }
+
+
+def _nearby_texts(
+    objects: list[dict],
+    target_index: int,
+    *,
+    max_each_side: int = 2,
+    max_chars: int = 600,
+) -> list[str]:
+    before = [
+        obj["text"].strip()
+        for obj in reversed(objects[:target_index])
+        if obj.get("type") == "text"
+        and isinstance(obj.get("text"), str)
+        and obj["text"].strip()
+    ][:max_each_side]
+    after = [
+        obj["text"].strip()
+        for obj in objects[target_index + 1 :]
+        if obj.get("type") == "text"
+        and isinstance(obj.get("text"), str)
+        and obj["text"].strip()
+    ][:max_each_side]
+    ordered = [*reversed(before), *after]
+    limited: list[str] = []
+    remaining = max_chars
+    for text in ordered:
+        if remaining <= 0:
+            break
+        value = text[:remaining]
+        limited.append(value)
+        remaining -= len(value)
+    return limited
+
+
+def _generate_image_contexts(
+    objects: list[dict],
+    *,
+    llm: Any | None,
+    context_generator: ContextGenerator | None,
+    concurrency: int,
+) -> dict[int, str | None]:
+    image_objects: list[tuple[int, dict, str]] = []
+    for source_index, obj in enumerate(objects):
+        if obj.get("type") != "image":
+            continue
+        searchable_text = image_to_searchable_text(obj)
+        if searchable_text:
+            image_objects.append((source_index, obj, searchable_text))
+
+    if not image_objects:
+        return {}
+
+    def generate_image_context(
+        source_index: int,
+        obj: dict,
+        searchable_text: str,
+    ) -> str | None:
+        section_path = _section_path_before_index(objects, source_index)
+        nearby = _nearby_texts(objects, source_index)
+        chunk_text = searchable_text
+        if context_generator is not None:
+            # Keep the public context_generator contract unchanged. The image
+            # searchable text is the chunk; nearby evidence is supplied to the
+            # default LLM prompt below.
+            return _generate_one_context(
+                chunk_text,
+                section_path,
+                source_object_index=source_index,
+                llm=llm,
+                context_generator=context_generator,
+            )
+
+        return _generate_one_context(
+            chunk_text,
+            section_path,
+            source_object_index=source_index,
+            llm=llm,
+            context_generator=None,
+            prompt_builder=lambda text, path: build_image_context_prompt(
+                text,
+                path,
+                nearby,
+            ),
+        )
+
+    worker_count = min(max(1, concurrency), len(image_objects))
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = [
+            executor.submit(generate_image_context, source_index, obj, text)
+            for source_index, obj, text in image_objects
+        ]
+        contexts = [future.result() for future in futures]
+
+    return {
+        source_index: contexts[image_index]
+        for image_index, (source_index, _, _) in enumerate(image_objects)
     }
 
 
