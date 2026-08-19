@@ -89,6 +89,13 @@ class ContractReviewService:
                 "current_item_index": 0,
                 "review_results": [],
                 "summary": None,
+                "retrieval_attempt": 0,
+                "current_retrieval_query": "",
+                "retrieved_evidence": [],
+                "absence_keywords": [],
+                "absence_candidates": [],
+                "absence_candidate_count": None,
+                "current_decision": None,
             }
         )
         summary = final_state["summary"]

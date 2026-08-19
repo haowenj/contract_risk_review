@@ -21,7 +21,6 @@ from app.contract_review.state import ContractReviewState
 
 
 type ProgressCallback = Callable[[str, dict[str, Any]], None]
-MAX_RETRIEVAL_ATTEMPTS = 2
 
 
 class ContractReviewNodes:
@@ -68,7 +67,7 @@ class ContractReviewNodes:
             "current_item_index": 0,
         }
 
-    def review_item(
+    def prepare_review_item(
         self,
         state: ContractReviewState,
     ) -> dict[str, Any]:
@@ -81,106 +80,157 @@ class ContractReviewNodes:
                     "item": item.model_dump(mode="json"),
                 },
             )
-            attempted_queries = [item.retrieval_query]
-            evidence: list[Evidence] = []
-            decision: RiskDecision | None = None
-            for attempt in range(1, MAX_RETRIEVAL_ATTEMPTS + 1):
-                current_query = attempted_queries[-1]
-                rerank_top3_debug: list[dict[str, Any]] = []
-                raw_evidence = self.contract_service.search_contract(
-                    state["contract_id"],
-                    current_query,
-                    debug_callback=rerank_top3_debug.extend,
-                )
-                retrieved_evidence = [
-                    Evidence.model_validate(value) for value in raw_evidence
-                ]
-                existing_indices = {
-                    value.source_object_index for value in evidence
-                }
-                evidence.extend(
-                    value
-                    for value in retrieved_evidence
-                    if value.source_object_index not in existing_indices
-                )
+        except Exception as exc:
+            raise RuntimeError(f"prepare_review_item {item.id} failed") from exc
+
+        return {
+            "retrieval_attempt": 1,
+            "current_retrieval_query": item.retrieval_query,
+            "retrieved_evidence": [],
+            "absence_keywords": [],
+            "absence_candidates": [],
+            "absence_candidate_count": None,
+            "current_decision": None,
+        }
+
+    def retrieve_evidence(
+        self,
+        state: ContractReviewState,
+    ) -> dict[str, Any]:
+        item = state["review_items"][state["current_item_index"]]
+        try:
+            rerank_top3_debug: list[dict[str, Any]] = []
+            raw_evidence = self.contract_service.search_contract(
+                state["contract_id"],
+                state["current_retrieval_query"],
+                debug_callback=rerank_top3_debug.extend,
+            )
+            current_evidence = [
+                Evidence.model_validate(value) for value in raw_evidence
+            ]
+            merged_evidence = list(state["retrieved_evidence"])
+            existing_indices = {
+                value.source_object_index for value in merged_evidence
+            }
+            for value in current_evidence:
+                if value.source_object_index not in existing_indices:
+                    merged_evidence.append(value)
+                    existing_indices.add(value.source_object_index)
+
+            self._emit(
+                "evidence_retrieved",
+                {
+                    "item_id": item.id,
+                    "attempt": state["retrieval_attempt"],
+                    "retrieval_query": state["current_retrieval_query"],
+                    "evidence": [
+                        value.model_dump(mode="json")
+                        for value in current_evidence
+                    ],
+                },
+            )
+            if not current_evidence:
                 self._emit(
-                    "evidence_retrieved",
+                    "empty_evidence_rerank_debug",
                     {
                         "item_id": item.id,
-                        "attempt": attempt,
-                        "retrieval_query": current_query,
-                        "evidence": [
-                            value.model_dump(mode="json")
-                            for value in retrieved_evidence
-                        ],
+                        "attempt": state["retrieval_attempt"],
+                        "retrieval_query": state["current_retrieval_query"],
+                        "rerank_top3": rerank_top3_debug,
                     },
                 )
-                if not retrieved_evidence:
-                    self._emit(
-                        "empty_evidence_rerank_debug",
-                        {
-                            "item_id": item.id,
-                            "attempt": attempt,
-                            "retrieval_query": current_query,
-                            "rerank_top3": rerank_top3_debug,
-                        },
-                    )
+        except Exception as exc:
+            raise RuntimeError(f"retrieve_evidence {item.id} failed") from exc
+        return {"retrieved_evidence": merged_evidence}
 
-                if evidence:
-                    response = self.review_llm.invoke(
-                        build_review_item_prompt(item, evidence)
-                    )
-                    decision = parse_llm_response(response, RiskDecision)
-                    if decision.evidence_status == "found":
-                        break
-                else:
-                    decision = None
+    def rewrite_query(
+        self,
+        state: ContractReviewState,
+    ) -> dict[str, Any]:
+        item = state["review_items"][state["current_item_index"]]
+        try:
+            if self.query_rewrite_llm is None:
+                raise ValueError("query_rewrite_llm is required for retry")
+            previous_query = state["current_retrieval_query"]
+            response = self.query_rewrite_llm.invoke(
+                build_retrieval_query_rewrite_prompt(
+                    item,
+                    attempted_queries=[previous_query],
+                    evidence=state["retrieved_evidence"],
+                    decision=state["current_decision"],
+                )
+            )
+            rewrite = parse_llm_response(response, RetrievalQueryRewrite)
+            if rewrite.retrieval_query == previous_query:
+                raise ValueError(
+                    "rewritten retrieval_query must differ from attempted query"
+                )
+            self._emit(
+                "retrieval_query_rewritten",
+                {
+                    "item_id": item.id,
+                    "next_attempt": 2,
+                    "previous_query": previous_query,
+                    "retrieval_query": rewrite.retrieval_query,
+                    "reason": rewrite.reason,
+                },
+            )
+        except Exception as exc:
+            raise RuntimeError(f"rewrite_query {item.id} failed") from exc
+        return {
+            "retrieval_attempt": 2,
+            "current_retrieval_query": rewrite.retrieval_query,
+            "absence_keywords": rewrite.keywords,
+        }
 
-                if attempt == MAX_RETRIEVAL_ATTEMPTS:
-                    break
-                if self.query_rewrite_llm is None:
-                    raise ValueError("query_rewrite_llm is required for retry")
-                rewrite_response = self.query_rewrite_llm.invoke(
-                    build_retrieval_query_rewrite_prompt(
-                        item,
-                        attempted_queries=attempted_queries,
-                        evidence=evidence,
-                        decision=decision,
-                    )
-                )
-                rewrite = parse_llm_response(
-                    rewrite_response,
-                    RetrievalQueryRewrite,
-                )
-                if rewrite.retrieval_query in attempted_queries:
-                    raise ValueError(
-                        "rewritten retrieval_query must differ from attempted queries"
-                    )
-                self._emit(
-                    "retrieval_query_rewritten",
-                    {
-                        "item_id": item.id,
-                        "next_attempt": attempt + 1,
-                        "previous_query": current_query,
-                        "retrieval_query": rewrite.retrieval_query,
-                        "reason": rewrite.reason,
-                    },
-                )
-                attempted_queries.append(rewrite.retrieval_query)
+    def risk_decision(
+        self,
+        state: ContractReviewState,
+    ) -> dict[str, Any]:
+        item = state["review_items"][state["current_item_index"]]
+        try:
+            evidence = state["absence_candidates"] or state["retrieved_evidence"]
+            response = self.review_llm.invoke(
+                build_review_item_prompt(item, evidence)
+            )
+            decision = parse_llm_response(response, RiskDecision)
+        except Exception as exc:
+            raise RuntimeError(f"risk_decision {item.id} failed") from exc
+        return {"current_decision": decision}
 
+    def insufficient_result(
+        self,
+        state: ContractReviewState,
+    ) -> dict[str, Any]:
+        item = state["review_items"][state["current_item_index"]]
+        try:
+            decision = RiskDecision(
+                risk_status="needs_review",
+                risk_level=None,
+                evidence_status="insufficient",
+                finding="两次检索均未获得足以支持判断的合同证据。",
+                risk_description="证据不足，无法可靠判断该审查项是否存在风险。",
+                suggestion="请人工核对合同全文及相关附件后再作判断。",
+            )
+        except Exception as exc:
+            raise RuntimeError(f"insufficient_result {item.id} failed") from exc
+        return {"current_decision": decision}
+
+    def finalize_review_item(
+        self,
+        state: ContractReviewState,
+    ) -> dict[str, Any]:
+        item = state["review_items"][state["current_item_index"]]
+        try:
+            decision = state["current_decision"]
             if decision is None:
-                decision = RiskDecision(
-                    risk_status="needs_review",
-                    risk_level=None,
-                    evidence_status="insufficient",
-                    finding="两次检索均未获得足以支持判断的合同证据。",
-                    risk_description="证据不足，无法可靠判断该审查项是否存在风险。",
-                    suggestion="请人工核对合同全文及相关附件后再作判断。",
-                )
+                raise ValueError("current_decision is required")
+            evidence = state["absence_candidates"] or state["retrieved_evidence"]
             result = ReviewResult(
                 item_id=item.id,
                 item_name=item.name,
                 evidence=evidence,
+                absence_check=None,
                 **decision.model_dump(),
             )
             self._emit(
@@ -188,8 +238,7 @@ class ContractReviewNodes:
                 {"result": result.model_dump(mode="json")},
             )
         except Exception as exc:
-            raise RuntimeError(f"review_item {item.id} failed") from exc
-
+            raise RuntimeError(f"finalize_review_item {item.id} failed") from exc
         return {
             "review_results": [result],
             "current_item_index": state["current_item_index"] + 1,

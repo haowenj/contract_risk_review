@@ -3,9 +3,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.contract_review.graph import build_contract_review_graph
+from app.contract_review.graph import (
+    build_contract_review_graph,
+    route_after_retrieve,
+)
 from app.contract_review.nodes import ContractReviewNodes
-from app.contract_review.schemas import ReviewItem, ReviewResult
+from app.contract_review.schemas import (
+    Evidence,
+    ReviewItem,
+    ReviewResult,
+    RiskDecision,
+)
 
 
 ITEMS_PAYLOAD = {
@@ -26,6 +34,8 @@ ITEMS_PAYLOAD = {
         },
     ]
 }
+
+ONE_ITEM_PAYLOAD = {"review_items": [ITEMS_PAYLOAD["review_items"][0]]}
 
 RISK_DECISION = {
     "risk_status": "risk",
@@ -116,9 +126,27 @@ def initial_state(**updates):
         "current_item_index": 0,
         "review_results": [],
         "summary": None,
+        "retrieval_attempt": 0,
+        "current_retrieval_query": "",
+        "retrieved_evidence": [],
+        "absence_keywords": [],
+        "absence_candidates": [],
+        "absence_candidate_count": None,
+        "current_decision": None,
     }
     state.update(updates)
     return state
+
+
+def build_nodes(**updates):
+    values = {
+        "parse_llm": FakeLLM(),
+        "review_llm": FakeLLM(),
+        "query_rewrite_llm": FakeLLM(),
+        "contract_service": FakeContractService(),
+    }
+    values.update(updates)
+    return ContractReviewNodes(**values)
 
 
 def result_for(status, level=None):
@@ -135,6 +163,49 @@ def result_for(status, level=None):
             "evidence": [] if status == "needs_review" else [EVIDENCE],
         }
     )
+
+
+def test_prepare_review_item_resets_per_item_state():
+    item = ReviewItem.model_validate(ITEMS_PAYLOAD["review_items"][0])
+    nodes = build_nodes()
+
+    update = nodes.prepare_review_item(
+        initial_state(
+            review_items=[item],
+            retrieval_attempt=2,
+            current_retrieval_query="旧查询",
+            retrieved_evidence=[Evidence.model_validate(EVIDENCE)],
+            absence_keywords=["旧关键词"],
+            absence_candidates=[Evidence.model_validate(EVIDENCE)],
+            absence_candidate_count=1,
+            current_decision=RiskDecision.model_validate(RISK_DECISION),
+        )
+    )
+
+    assert update == {
+        "retrieval_attempt": 1,
+        "current_retrieval_query": "合同约定的付款期限是多久",
+        "retrieved_evidence": [],
+        "absence_keywords": [],
+        "absence_candidates": [],
+        "absence_candidate_count": None,
+        "current_decision": None,
+    }
+
+
+def test_route_after_retrieve_never_creates_a_third_rag_attempt():
+    assert route_after_retrieve(
+        initial_state(retrieval_attempt=1, retrieved_evidence=[])
+    ) == "rewrite_query"
+    assert route_after_retrieve(
+        initial_state(retrieval_attempt=2, retrieved_evidence=[])
+    ) == "insufficient_result"
+    assert route_after_retrieve(
+        initial_state(
+            retrieval_attempt=2,
+            retrieved_evidence=[Evidence.model_validate(EVIDENCE)],
+        )
+    ) == "risk_decision"
 
 
 def test_parse_review_rules_node_validates_items_and_emits_serializable_progress():
@@ -155,58 +226,56 @@ def test_parse_review_rules_node_validates_items_and_emits_serializable_progress
     json.dumps(events[0][1], ensure_ascii=False)
 
 
-def test_review_item_node_uses_current_query_and_preserves_rag_citations():
+def test_explicit_graph_uses_current_query_and_preserves_rag_citations():
     events = []
     contract_service = FakeContractService([EVIDENCE])
     query_rewrite_llm = FakeLLM()
     nodes = ContractReviewNodes(
-        parse_llm=FakeLLM(),
+        parse_llm=FakeLLM(ONE_ITEM_PAYLOAD),
         review_llm=FakeLLM(RISK_DECISION),
         query_rewrite_llm=query_rewrite_llm,
         contract_service=contract_service,
         progress_callback=lambda event, payload: events.append((event, payload)),
     )
-    item = ReviewItem.model_validate(ITEMS_PAYLOAD["review_items"][0])
-
-    update = nodes.review_item(initial_state(review_items=[item]))
+    final_state = build_contract_review_graph(nodes).invoke(initial_state())
 
     assert contract_service.searches == [
         ("contract-1", "合同约定的付款期限是多久")
     ]
-    assert update["current_item_index"] == 1
-    assert len(update["review_results"]) == 1
-    result = update["review_results"][0]
+    assert final_state["current_item_index"] == 1
+    assert len(final_state["review_results"]) == 1
+    result = final_state["review_results"][0]
     assert result.item_id == "item_1"
     assert result.evidence[0].source_object_index == 27
     assert result.evidence[0].page_idx == 4
     assert result.evidence[0].node_type == "table"
     assert query_rewrite_llm.prompts == []
     assert [event for event, _ in events] == [
+        "review_items_parsed",
         "review_item_started",
         "evidence_retrieved",
         "review_item_completed",
+        "review_summary",
     ]
     for _, payload in events:
         json.dumps(payload, ensure_ascii=False)
 
 
-def test_review_item_node_rewrites_query_after_empty_evidence_without_first_review_call():
+def test_explicit_graph_rewrites_query_after_empty_evidence_without_first_review_call():
     events = []
     review_llm = FakeLLM(RISK_DECISION)
     query_rewrite_llm = FakeLLM(QUERY_REWRITE)
     contract_service = FakeContractService([], [SECOND_EVIDENCE])
     nodes = ContractReviewNodes(
-        parse_llm=FakeLLM(),
+        parse_llm=FakeLLM(ONE_ITEM_PAYLOAD),
         review_llm=review_llm,
         query_rewrite_llm=query_rewrite_llm,
         contract_service=contract_service,
         progress_callback=lambda event, payload: events.append((event, payload)),
     )
-    item = ReviewItem.model_validate(ITEMS_PAYLOAD["review_items"][0])
+    final_state = build_contract_review_graph(nodes).invoke(initial_state())
 
-    update = nodes.review_item(initial_state(review_items=[item]))
-
-    result = update["review_results"][0]
+    result = final_state["review_results"][0]
     assert contract_service.searches == [
         ("contract-1", "合同约定的付款期限是多久"),
         ("contract-1", QUERY_REWRITE["retrieval_query"]),
@@ -216,28 +285,30 @@ def test_review_item_node_rewrites_query_after_empty_evidence_without_first_revi
     assert result.risk_status == "risk"
     assert [value.source_object_index for value in result.evidence] == [99]
     assert [event for event, _ in events] == [
+        "review_items_parsed",
         "review_item_started",
         "evidence_retrieved",
         "empty_evidence_rerank_debug",
         "retrieval_query_rewritten",
         "evidence_retrieved",
         "review_item_completed",
+        "review_summary",
     ]
     assert [
         payload["attempt"]
         for event, payload in events
         if event == "evidence_retrieved"
     ] == [1, 2]
-    assert events[2][1] == {
+    assert events[3][1] == {
         "item_id": "item_1",
         "attempt": 1,
         "retrieval_query": "合同约定的付款期限是多久",
         "rerank_top3": RERANK_TOP3_DEBUG,
     }
-    assert events[3][1]["retrieval_query"] == QUERY_REWRITE["retrieval_query"]
+    assert events[4][1]["retrieval_query"] == QUERY_REWRITE["retrieval_query"]
 
 
-def test_review_item_node_retries_insufficient_decision_and_merges_unique_evidence():
+def test_explicit_graph_retries_insufficient_decision_and_merges_unique_evidence():
     review_llm = FakeLLM(INSUFFICIENT_DECISION, RISK_DECISION)
     query_rewrite_llm = FakeLLM(QUERY_REWRITE)
     contract_service = FakeContractService(
@@ -245,37 +316,33 @@ def test_review_item_node_retries_insufficient_decision_and_merges_unique_eviden
         [EVIDENCE, SECOND_EVIDENCE],
     )
     nodes = ContractReviewNodes(
-        parse_llm=FakeLLM(),
+        parse_llm=FakeLLM(ONE_ITEM_PAYLOAD),
         review_llm=review_llm,
         query_rewrite_llm=query_rewrite_llm,
         contract_service=contract_service,
     )
-    item = ReviewItem.model_validate(ITEMS_PAYLOAD["review_items"][0])
+    final_state = build_contract_review_graph(nodes).invoke(initial_state())
 
-    update = nodes.review_item(initial_state(review_items=[item]))
-
-    result = update["review_results"][0]
+    result = final_state["review_results"][0]
     assert len(review_llm.prompts) == 2
     assert len(query_rewrite_llm.prompts) == 1
     assert len(contract_service.searches) == 2
     assert [value.source_object_index for value in result.evidence] == [27, 99]
 
 
-def test_review_item_node_stops_after_second_empty_retrieval_without_review_llm():
+def test_explicit_graph_stops_after_second_empty_retrieval_without_review_llm():
     review_llm = FakeLLM()
     query_rewrite_llm = FakeLLM(QUERY_REWRITE)
     contract_service = FakeContractService([], [])
     nodes = ContractReviewNodes(
-        parse_llm=FakeLLM(),
+        parse_llm=FakeLLM(ONE_ITEM_PAYLOAD),
         review_llm=review_llm,
         query_rewrite_llm=query_rewrite_llm,
         contract_service=contract_service,
     )
-    item = ReviewItem.model_validate(ITEMS_PAYLOAD["review_items"][0])
+    final_state = build_contract_review_graph(nodes).invoke(initial_state())
 
-    update = nodes.review_item(initial_state(review_items=[item]))
-
-    result = update["review_results"][0]
+    result = final_state["review_results"][0]
     assert len(contract_service.searches) == 2
     assert len(query_rewrite_llm.prompts) == 1
     assert review_llm.prompts == []
@@ -331,8 +398,14 @@ def test_node_failures_include_stage_context_and_preserve_cause():
         review_llm=FakeLLM(RISK_DECISION),
         contract_service=FakeContractService(RuntimeError("rerank unavailable")),
     )
-    with pytest.raises(RuntimeError, match="review_item item_1 failed") as review_error:
-        review_nodes.review_item(initial_state(review_items=[item]))
+    with pytest.raises(RuntimeError, match="retrieve_evidence item_1 failed") as review_error:
+        review_nodes.retrieve_evidence(
+            initial_state(
+                review_items=[item],
+                retrieval_attempt=1,
+                current_retrieval_query=item.retrieval_query,
+            )
+        )
     assert str(review_error.value.__cause__) == "rerank unavailable"
 
 

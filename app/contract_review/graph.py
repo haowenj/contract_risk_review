@@ -8,24 +8,68 @@ from app.contract_review.nodes import ContractReviewNodes
 from app.contract_review.state import ContractReviewState
 
 
-def route_after_review(state: ContractReviewState) -> str:
+def route_after_retrieve(state: ContractReviewState) -> str:
+    if state["retrieved_evidence"]:
+        return "risk_decision"
+    if state["retrieval_attempt"] < 2:
+        return "rewrite_query"
+    return "insufficient_result"
+
+
+def route_after_risk_decision(state: ContractReviewState) -> str:
+    decision = state["current_decision"]
+    if (
+        decision is not None
+        and decision.evidence_status == "insufficient"
+        and state["retrieval_attempt"] < 2
+    ):
+        return "rewrite_query"
+    return "finalize_review_item"
+
+
+def route_after_finalize(state: ContractReviewState) -> str:
     if state["current_item_index"] < len(state["review_items"]):
-        return "review_item"
+        return "prepare_review_item"
     return "aggregate_results"
 
 
 def build_contract_review_graph(nodes: ContractReviewNodes) -> Any:
     builder = StateGraph(ContractReviewState)
     builder.add_node("parse_review_rules", nodes.parse_review_rules)
-    builder.add_node("review_item", nodes.review_item)
+    builder.add_node("prepare_review_item", nodes.prepare_review_item)
+    builder.add_node("retrieve_evidence", nodes.retrieve_evidence)
+    builder.add_node("rewrite_query", nodes.rewrite_query)
+    builder.add_node("risk_decision", nodes.risk_decision)
+    builder.add_node("insufficient_result", nodes.insufficient_result)
+    builder.add_node("finalize_review_item", nodes.finalize_review_item)
     builder.add_node("aggregate_results", nodes.aggregate_results)
     builder.add_edge(START, "parse_review_rules")
-    builder.add_edge("parse_review_rules", "review_item")
+    builder.add_edge("parse_review_rules", "prepare_review_item")
+    builder.add_edge("prepare_review_item", "retrieve_evidence")
     builder.add_conditional_edges(
-        "review_item",
-        route_after_review,
+        "retrieve_evidence",
+        route_after_retrieve,
         {
-            "review_item": "review_item",
+            "risk_decision": "risk_decision",
+            "rewrite_query": "rewrite_query",
+            "insufficient_result": "insufficient_result",
+        },
+    )
+    builder.add_edge("rewrite_query", "retrieve_evidence")
+    builder.add_conditional_edges(
+        "risk_decision",
+        route_after_risk_decision,
+        {
+            "rewrite_query": "rewrite_query",
+            "finalize_review_item": "finalize_review_item",
+        },
+    )
+    builder.add_edge("insufficient_result", "finalize_review_item")
+    builder.add_conditional_edges(
+        "finalize_review_item",
+        route_after_finalize,
+        {
+            "prepare_review_item": "prepare_review_item",
             "aggregate_results": "aggregate_results",
         },
     )
