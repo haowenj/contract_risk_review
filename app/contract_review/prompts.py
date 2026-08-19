@@ -15,7 +15,22 @@ def build_parse_review_rules_prompt(review_rule_text: str) -> str:
 3. review_goal 说明需要对合同事实作出的判断。
 4. retrieval_query 只用于从合同中检索相关事实，不要预设风险结论。
 5. 不合并相互独立的标准，也不要把同一标准重复拆分。
-6. 只返回严格 JSON Schema 要求的字段。
+6. 每个审查项必须包含且只能包含 id、name、rule_basis、review_goal、retrieval_query 五个字段。
+7. id 按 item_1、item_2、item_3 的格式依次生成；name 是输入规范中该项标准的简短名称。
+8. 顶层必须是 JSON 对象，且只能包含 review_items 数组；不得直接返回数组。
+
+JSON 协议：
+{{
+  "review_items": [
+    {{
+      "id": "item_1",
+      "name": "审查项名称",
+      "rule_basis": "输入规范中明确存在的标准",
+      "review_goal": "需要根据合同事实判断的目标",
+      "retrieval_query": "用于检索合同事实的问题"
+    }}
+  ]
+}}
 
 审查规范原文：
 <review_rule_text>
@@ -39,7 +54,19 @@ def build_review_item_prompt(
 3. 如果证据不足以支持风险或无风险结论，返回 risk_status=needs_review、evidence_status=insufficient、risk_level=null。
 4. 没有检索到证据不等于合同没有约定，不得作此推断。
 5. risk_status=risk 时必须给出 high、medium 或 low；其他状态的 risk_level 必须为 null。
-6. 只返回严格 JSON Schema 要求的判断字段。
+6. 顶层必须是 JSON 对象，只能包含 risk_status、risk_level、evidence_status、finding、risk_description、suggestion 六个字段。
+7. risk_status 只能是 risk、no_obvious_risk、needs_review；evidence_status 只能是 found、insufficient。
+8. 不得输出 evidence 数组或任何证据引用字段。
+
+JSON 协议：
+{{
+  "risk_status": "risk | no_obvious_risk | needs_review",
+  "risk_level": "high | medium | low | null",
+  "evidence_status": "found | insufficient",
+  "finding": "基于证据的审查发现",
+  "risk_description": "风险说明",
+  "suggestion": "修改或人工核对建议"
+}}
 
 rule_basis：
 {item.rule_basis}
