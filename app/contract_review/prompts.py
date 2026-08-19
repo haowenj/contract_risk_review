@@ -99,12 +99,16 @@ def build_retrieval_query_rewrite_prompt(
 2. 使用合同中可能出现的近义词、章节名称、主体称谓和履约表达扩展查询。
 3. 结合已尝试查询、已有 Evidence 和证据不足原因，避免重复原查询。
 4. 生成一个适合 Vector → Rerank → Evidence Selector 链路的自然语言检索问题。
-5. 顶层必须是 JSON 对象，只能包含 retrieval_query 和 reason 两个字段。
+5. 同时生成用于合同全文确定性扫描的 keywords。keywords 只能围绕当前 rule_basis 和 review_goal 扩展，允许同义词、常见法律表达和措辞变体，不得形成新的风险审查标准。
+6. keywords 应优先使用能够识别当前审查主题的核心术语或具有业务区分度的短语；不要单独输出“同意、批准、许可、责任、合同”等缺乏主题区分度的泛化词。如确有必要，应与审查主题组合成完整短语。
+7. keywords 不得包含空字符串或重复项。
+8. 顶层必须是 JSON 对象，只能包含 retrieval_query、reason 和 keywords 三个字段。
 
 JSON 协议：
 {{
   "retrieval_query": "改写后的单个合同检索问题",
-  "reason": "本次改写覆盖了哪些遗漏表达"
+  "reason": "本次改写覆盖了哪些遗漏表达",
+  "keywords": ["当前审查主题的核心术语", "具有业务区分度的短语"]
 }}
 
 rule_basis：
@@ -121,4 +125,46 @@ review_goal：
 
 证据不足上下文：
 {json.dumps(insufficient_context, ensure_ascii=False, indent=2)}
+"""
+
+
+def build_absence_result_prompt(
+    item: ReviewItem,
+    *,
+    keywords: list[str],
+) -> str:
+    return f"""你需要依据当前风险规范和已经完成的合同缺失核验事实，形成结构化风险判断。
+
+已完成的确定性核验事实：
+- 针对同一审查项的两次语义检索均未返回有效合同证据。
+- 系统随后读取当前合同完整的 merged_content_list 解析结果，并使用下列关键词进行确定性全文扫描。
+- 全文扫描候选对象数量为 0。
+
+要求：
+1. 只依据当前 rule_basis、review_goal 和上述核验事实判断，不得增加输入中不存在的审查标准。
+2. 如果当前规则明确要求合同必须存在某项约定，可以据此判断缺失风险；风险等级必须结合当前规则本身判断，不得在规则之外另设标准。
+3. finding 必须使用“基于当前合同全文解析结果，未发现……”这类限定表述。
+4. 不得使用“合同肯定没有……”等绝对表述，也不得声称核验覆盖了解析结果之外的原始内容。
+5. evidence_status 必须为 absence_verified。
+6. risk_status=risk 时必须给出 high、medium 或 low；其他状态的 risk_level 必须为 null。
+7. 顶层必须是 JSON 对象，只能包含 risk_status、risk_level、evidence_status、finding、risk_description、suggestion 六个字段；不得添加引用字段、扫描元数据或其他字段。
+
+JSON 协议：
+{{
+  "risk_status": "risk | no_obvious_risk | needs_review",
+  "risk_level": "high | medium | low | null",
+  "evidence_status": "absence_verified",
+  "finding": "基于当前合同全文解析结果，未发现与审查要求对应的明确条款",
+  "risk_description": "结合当前审查规范说明缺失可能造成的风险",
+  "suggestion": "仅针对当前审查规范提出补充或人工核对建议"
+}}
+
+rule_basis：
+{item.rule_basis}
+
+review_goal：
+{item.review_goal}
+
+全文扫描关键词：
+{json.dumps(keywords, ensure_ascii=False, indent=2)}
 """

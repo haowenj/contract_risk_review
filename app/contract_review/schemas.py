@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from typing import Any, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 RiskStatus = Literal["risk", "no_obvious_risk", "needs_review"]
 RiskLevel = Literal["high", "medium", "low"]
-EvidenceStatus = Literal["found", "insufficient"]
+EvidenceStatus = Literal["found", "insufficient", "absence_verified"]
 NodeType = Literal["text", "table", "image"]
 
 
@@ -35,9 +36,50 @@ class ReviewItemList(StrictModel):
         return self
 
 
+def _normalize_keyword_key(value: str) -> str:
+    return "".join(unicodedata.normalize("NFKC", value).casefold().split())
+
+
+def _clean_keywords(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError("keywords must be a list")
+
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for keyword in value:
+        if not isinstance(keyword, str):
+            raise ValueError("keywords must contain only strings")
+        display_value = keyword.strip()
+        normalized_key = _normalize_keyword_key(display_value)
+        if not normalized_key or normalized_key in seen:
+            continue
+        seen.add(normalized_key)
+        cleaned.append(display_value)
+
+    if not cleaned:
+        raise ValueError("keywords must contain at least one non-empty value")
+    return cleaned
+
+
 class RetrievalQueryRewrite(StrictModel):
     retrieval_query: str = Field(min_length=1)
     reason: str = Field(min_length=1)
+    keywords: list[str] = Field(min_length=1)
+
+    @field_validator("keywords", mode="before")
+    @classmethod
+    def normalize_keywords(cls, value: Any) -> list[str]:
+        return _clean_keywords(value)
+
+
+class AbsenceCheckMetadata(StrictModel):
+    keywords: list[str] = Field(min_length=1)
+    candidate_count: int = Field(ge=0)
+
+    @field_validator("keywords", mode="before")
+    @classmethod
+    def normalize_keywords(cls, value: Any) -> list[str]:
+        return _clean_keywords(value)
 
 
 class Evidence(BaseModel):
@@ -90,6 +132,19 @@ class ReviewResult(RiskDecision):
     item_id: str = Field(min_length=1)
     item_name: str = Field(min_length=1)
     evidence: list[Evidence]
+    absence_check: AbsenceCheckMetadata | None = None
+
+    @model_validator(mode="after")
+    def validate_absence_verified_audit(self) -> ReviewResult:
+        if self.evidence_status != "absence_verified":
+            return self
+        if self.evidence:
+            raise ValueError("absence_verified requires an empty evidence list")
+        if self.absence_check is None:
+            raise ValueError("absence_verified requires absence_check metadata")
+        if self.absence_check.candidate_count != 0:
+            raise ValueError("absence_verified requires candidate_count=0")
+        return self
 
 
 class ReviewSummary(StrictModel):

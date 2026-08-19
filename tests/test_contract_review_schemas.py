@@ -32,6 +32,13 @@ DECISION = {
     "suggestion": "将付款期限调整为90日以内。",
 }
 
+EVIDENCE = {
+    "source_object_index": 12,
+    "page_idx": 4,
+    "node_type": "text",
+    "evidence_text": "未经甲方书面同意，乙方不得将合同义务转委托给第三方。",
+}
+
 
 def test_review_item_strips_non_empty_fields():
     item = ReviewItem.model_validate(
@@ -151,17 +158,96 @@ def test_retrieval_query_rewrite_strips_fields_and_rejects_extras():
         {
             "retrieval_query": "  乙方权利义务及第三方履约约定  ",
             "reason": "  扩展分包和转委托的近义表达  ",
+            "keywords": ["  分包  ", "转包"],
         }
     )
 
     assert rewrite.model_dump() == {
         "retrieval_query": "乙方权利义务及第三方履约约定",
         "reason": "扩展分包和转委托的近义表达",
+        "keywords": ["分包", "转包"],
     }
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         RetrievalQueryRewrite.model_validate(
             {
                 **rewrite.model_dump(),
                 "new_rule": "未经同意一律视为高风险",
+            }
+        )
+
+
+def test_retrieval_query_rewrite_normalizes_and_deduplicates_keywords():
+    rewrite = RetrievalQueryRewrite.model_validate(
+        {
+            "retrieval_query": "检索乙方分包、转包和第三方履约限制",
+            "reason": "覆盖同义表达",
+            "keywords": [" 分包 ", "转包", "ＦＥＮＢＡＯ", "fenbao", "", "转委托"],
+        }
+    )
+
+    assert rewrite.keywords == ["分包", "转包", "ＦＥＮＢＡＯ", "转委托"]
+
+
+@pytest.mark.parametrize("keywords", [[], ["", "   "]])
+def test_retrieval_query_rewrite_rejects_unusable_keywords(keywords):
+    with pytest.raises(ValidationError, match="keywords"):
+        RetrievalQueryRewrite.model_validate(
+            {
+                "retrieval_query": "检索乙方分包限制",
+                "reason": "覆盖同义表达",
+                "keywords": keywords,
+            }
+        )
+
+
+def test_absence_verified_review_result_preserves_scan_audit():
+    result = ReviewResult.model_validate(
+        {
+            "item_id": "item_1",
+            "item_name": "分包转包限制",
+            "risk_status": "risk",
+            "risk_level": "medium",
+            "evidence_status": "absence_verified",
+            "finding": "基于当前合同全文解析结果，未发现明确的分包转包限制条款。",
+            "risk_description": "审查规范要求合同包含相关限制。",
+            "suggestion": "建议补充明确限制条款。",
+            "evidence": [],
+            "absence_check": {
+                "keywords": [" 分包 ", "转包", "分包"],
+                "candidate_count": 0,
+            },
+        }
+    )
+
+    assert result.absence_check is not None
+    assert result.absence_check.keywords == ["分包", "转包"]
+    assert result.absence_check.candidate_count == 0
+
+
+@pytest.mark.parametrize(
+    ("evidence", "absence_check"),
+    [
+        ([EVIDENCE], {"keywords": ["分包"], "candidate_count": 0}),
+        ([], None),
+        ([], {"keywords": ["分包"], "candidate_count": 1}),
+    ],
+)
+def test_absence_verified_review_result_rejects_inconsistent_audit(
+    evidence,
+    absence_check,
+):
+    with pytest.raises(ValidationError, match="absence_verified"):
+        ReviewResult.model_validate(
+            {
+                "item_id": "item_1",
+                "item_name": "分包转包限制",
+                "risk_status": "risk",
+                "risk_level": "medium",
+                "evidence_status": "absence_verified",
+                "finding": "基于当前合同全文解析结果，未发现相关条款。",
+                "risk_description": "规范要求合同包含相关限制。",
+                "suggestion": "建议补充限制条款。",
+                "evidence": evidence,
+                "absence_check": absence_check,
             }
         )
