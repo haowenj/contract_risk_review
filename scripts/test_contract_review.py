@@ -26,6 +26,8 @@ EVENT_HEADINGS = {
     "review_items_parsed": "解析出的 ReviewItem",
     "review_item_started": "当前审查项",
     "evidence_retrieved": "RAG 命中的 Evidence",
+    "empty_evidence_rerank_debug": "Evidence 为空，Rerank Top3 Debug",
+    "retrieval_query_rewritten": "证据不足，改写检索问题",
     "review_item_completed": "本项风险结果",
     "review_summary": "最终汇总",
 }

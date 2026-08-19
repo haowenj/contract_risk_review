@@ -84,6 +84,21 @@ def test_pipeline_retrieves_reranks_and_selects_evidence_without_answer_generati
     assert "llm_summary" not in result
 
 
+def test_pipeline_can_preserve_explicit_empty_evidence_selection():
+    index = FakeIndex([result_for(10, "仅有章节标题")])
+
+    result = RAGPipeline().retrieve_evidence(
+        index,
+        "问题",
+        reranker=FakeReranker(),
+        selector_llm=FakeLLM({"evidence_indices": []}),
+        fallback_on_empty_selection=False,
+    )
+
+    assert result["selected_indices"] == []
+    assert result["selected_nodes"] == []
+
+
 def test_pipeline_rejects_blank_questions():
     with pytest.raises(ValueError, match="question must not be empty"):
         RAGPipeline().run(FakeIndex([]), "  ")

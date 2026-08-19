@@ -9,6 +9,7 @@ from app.contract_review.schemas import (
     ReviewItem,
     ReviewItemList,
     ReviewResult,
+    RetrievalQueryRewrite,
     RiskDecision,
     parse_llm_response,
 )
@@ -143,3 +144,24 @@ def test_parse_llm_response_accepts_content_json_and_parsed_payload():
 
     assert parse_llm_response(content_response, ReviewItemList).review_items[0].id == "item_1"
     assert parse_llm_response(parsed_response, ReviewItemList).review_items[0].id == "item_1"
+
+
+def test_retrieval_query_rewrite_strips_fields_and_rejects_extras():
+    rewrite = RetrievalQueryRewrite.model_validate(
+        {
+            "retrieval_query": "  乙方权利义务及第三方履约约定  ",
+            "reason": "  扩展分包和转委托的近义表达  ",
+        }
+    )
+
+    assert rewrite.model_dump() == {
+        "retrieval_query": "乙方权利义务及第三方履约约定",
+        "reason": "扩展分包和转委托的近义表达",
+    }
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        RetrievalQueryRewrite.model_validate(
+            {
+                **rewrite.model_dump(),
+                "new_rule": "未经同意一律视为高风险",
+            }
+        )

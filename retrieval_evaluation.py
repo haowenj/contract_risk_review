@@ -271,6 +271,7 @@ def select_evidence(
     reranked_nodes: list[Any],
     *,
     llm: Any | None = None,
+    fallback_on_empty: bool = True,
 ) -> list[int]:
     if not reranked_nodes:
         return []
@@ -287,6 +288,8 @@ def select_evidence(
             raw_selected_indices = payload.get("evidence_indices")
         else:
             raise ValueError("Selector response must be a JSON object or array")
+        if raw_selected_indices == [] and not fallback_on_empty:
+            return []
         return _normalize_selected_indices(
             reranked_nodes,
             raw_selected_indices,

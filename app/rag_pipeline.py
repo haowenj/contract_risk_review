@@ -18,6 +18,7 @@ class RAGPipeline:
         *,
         reranker: Any | None = None,
         selector_llm: Any | None = None,
+        fallback_on_empty_selection: bool = True,
     ) -> dict[str, Any]:
         if not question.strip():
             raise ValueError("question must not be empty")
@@ -31,6 +32,7 @@ class RAGPipeline:
             question,
             reranked_results,
             llm=selector_llm,
+            fallback_on_empty=fallback_on_empty_selection,
         )
         selected_nodes = retrieval_evaluation.filter_nodes_by_indices(
             reranked_results,

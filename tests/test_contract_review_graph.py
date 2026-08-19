@@ -45,6 +45,34 @@ EVIDENCE = {
     "table_body": "<table><tr><td>180日</td></tr></table>",
 }
 
+SECOND_EVIDENCE = {
+    "source_object_index": 99,
+    "page_idx": 12,
+    "node_type": "text",
+    "text": "乙方不得将合同义务转委托给第三方。",
+    "evidence_text": "乙方不得将合同义务转委托给第三方。",
+}
+
+QUERY_REWRITE = {
+    "retrieval_query": "乙方权利义务、转委托、第三方履约及委托其他单位实施的约定",
+    "reason": "扩展分包和转包的近义表达与相关章节名称",
+}
+
+RERANK_TOP3_DEBUG = [
+    {"source_object_index": 51, "text": "（二）乙方权利与义务"},
+    {"source_object_index": 47, "text": "（一）甲方权利与义务"},
+    {"source_object_index": 46, "text": "第五条 双方权利与义务"},
+]
+
+INSUFFICIENT_DECISION = {
+    "risk_status": "needs_review",
+    "risk_level": None,
+    "evidence_status": "insufficient",
+    "finding": "现有证据只有章节标题。",
+    "risk_description": "证据不足以判断是否允许分包。",
+    "suggestion": "继续检索乙方权利义务及第三方履约约定。",
+}
+
 
 class FakeLLM:
     def __init__(self, *payloads):
@@ -69,11 +97,13 @@ class FakeContractService:
         self.evidence_sets = list(evidence_sets)
         self.searches = []
 
-    def search_contract(self, contract_id, query):
+    def search_contract(self, contract_id, query, *, debug_callback=None):
         self.searches.append((contract_id, query))
         evidence = self.evidence_sets.pop(0)
         if isinstance(evidence, Exception):
             raise evidence
+        if not evidence and debug_callback is not None:
+            debug_callback(RERANK_TOP3_DEBUG)
         return evidence
 
 
@@ -127,9 +157,11 @@ def test_parse_review_rules_node_validates_items_and_emits_serializable_progress
 def test_review_item_node_uses_current_query_and_preserves_rag_citations():
     events = []
     contract_service = FakeContractService([EVIDENCE])
+    query_rewrite_llm = FakeLLM()
     nodes = ContractReviewNodes(
         parse_llm=FakeLLM(),
         review_llm=FakeLLM(RISK_DECISION),
+        query_rewrite_llm=query_rewrite_llm,
         contract_service=contract_service,
         progress_callback=lambda event, payload: events.append((event, payload)),
     )
@@ -147,6 +179,7 @@ def test_review_item_node_uses_current_query_and_preserves_rag_citations():
     assert result.evidence[0].source_object_index == 27
     assert result.evidence[0].page_idx == 4
     assert result.evidence[0].node_type == "table"
+    assert query_rewrite_llm.prompts == []
     assert [event for event, _ in events] == [
         "review_item_started",
         "evidence_retrieved",
@@ -156,24 +189,95 @@ def test_review_item_node_uses_current_query_and_preserves_rag_citations():
         json.dumps(payload, ensure_ascii=False)
 
 
-def test_review_item_node_forces_needs_review_when_rag_evidence_is_empty():
-    optimistic_decision = {
-        **RISK_DECISION,
-        "risk_status": "no_obvious_risk",
-        "risk_level": None,
-    }
-    review_llm = FakeLLM(optimistic_decision)
+def test_review_item_node_rewrites_query_after_empty_evidence_without_first_review_call():
+    events = []
+    review_llm = FakeLLM(RISK_DECISION)
+    query_rewrite_llm = FakeLLM(QUERY_REWRITE)
+    contract_service = FakeContractService([], [SECOND_EVIDENCE])
     nodes = ContractReviewNodes(
         parse_llm=FakeLLM(),
         review_llm=review_llm,
-        contract_service=FakeContractService([]),
+        query_rewrite_llm=query_rewrite_llm,
+        contract_service=contract_service,
+        progress_callback=lambda event, payload: events.append((event, payload)),
     )
     item = ReviewItem.model_validate(ITEMS_PAYLOAD["review_items"][0])
 
     update = nodes.review_item(initial_state(review_items=[item]))
 
     result = update["review_results"][0]
+    assert contract_service.searches == [
+        ("contract-1", "合同约定的付款期限是多久"),
+        ("contract-1", QUERY_REWRITE["retrieval_query"]),
+    ]
+    assert len(query_rewrite_llm.prompts) == 1
     assert len(review_llm.prompts) == 1
+    assert result.risk_status == "risk"
+    assert [value.source_object_index for value in result.evidence] == [99]
+    assert [event for event, _ in events] == [
+        "review_item_started",
+        "evidence_retrieved",
+        "empty_evidence_rerank_debug",
+        "retrieval_query_rewritten",
+        "evidence_retrieved",
+        "review_item_completed",
+    ]
+    assert [
+        payload["attempt"]
+        for event, payload in events
+        if event == "evidence_retrieved"
+    ] == [1, 2]
+    assert events[2][1] == {
+        "item_id": "item_1",
+        "attempt": 1,
+        "retrieval_query": "合同约定的付款期限是多久",
+        "rerank_top3": RERANK_TOP3_DEBUG,
+    }
+    assert events[3][1]["retrieval_query"] == QUERY_REWRITE["retrieval_query"]
+
+
+def test_review_item_node_retries_insufficient_decision_and_merges_unique_evidence():
+    review_llm = FakeLLM(INSUFFICIENT_DECISION, RISK_DECISION)
+    query_rewrite_llm = FakeLLM(QUERY_REWRITE)
+    contract_service = FakeContractService(
+        [EVIDENCE],
+        [EVIDENCE, SECOND_EVIDENCE],
+    )
+    nodes = ContractReviewNodes(
+        parse_llm=FakeLLM(),
+        review_llm=review_llm,
+        query_rewrite_llm=query_rewrite_llm,
+        contract_service=contract_service,
+    )
+    item = ReviewItem.model_validate(ITEMS_PAYLOAD["review_items"][0])
+
+    update = nodes.review_item(initial_state(review_items=[item]))
+
+    result = update["review_results"][0]
+    assert len(review_llm.prompts) == 2
+    assert len(query_rewrite_llm.prompts) == 1
+    assert len(contract_service.searches) == 2
+    assert [value.source_object_index for value in result.evidence] == [27, 99]
+
+
+def test_review_item_node_stops_after_second_empty_retrieval_without_review_llm():
+    review_llm = FakeLLM()
+    query_rewrite_llm = FakeLLM(QUERY_REWRITE)
+    contract_service = FakeContractService([], [])
+    nodes = ContractReviewNodes(
+        parse_llm=FakeLLM(),
+        review_llm=review_llm,
+        query_rewrite_llm=query_rewrite_llm,
+        contract_service=contract_service,
+    )
+    item = ReviewItem.model_validate(ITEMS_PAYLOAD["review_items"][0])
+
+    update = nodes.review_item(initial_state(review_items=[item]))
+
+    result = update["review_results"][0]
+    assert len(contract_service.searches) == 2
+    assert len(query_rewrite_llm.prompts) == 1
+    assert review_llm.prompts == []
     assert result.risk_status == "needs_review"
     assert result.risk_level is None
     assert result.evidence_status == "insufficient"

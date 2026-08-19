@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.contract_review.schemas import Evidence, ReviewItem
+from app.contract_review.schemas import Evidence, ReviewItem, RiskDecision
 
 
 def build_parse_review_rules_prompt(review_rule_text: str) -> str:
@@ -76,4 +76,49 @@ review_goal：
 
 真实合同 Evidence：
 {json.dumps(evidence_payload, ensure_ascii=False, indent=2)}
+"""
+
+
+def build_retrieval_query_rewrite_prompt(
+    item: ReviewItem,
+    *,
+    attempted_queries: list[str],
+    evidence: list[Evidence],
+    decision: RiskDecision | None,
+) -> str:
+    evidence_payload = [value.model_dump(mode="json") for value in evidence]
+    insufficient_context = (
+        decision.model_dump(mode="json")
+        if decision is not None
+        else {"reason": "当前检索未返回合同证据"}
+    )
+    return f"""你需要为同一个合同审查项改写检索问题，以寻找第一轮遗漏的合同表达。
+
+要求：
+1. 只能改写检索方式，不得增加、修改或放宽 rule_basis 中的审查标准。
+2. 使用合同中可能出现的近义词、章节名称、主体称谓和履约表达扩展查询。
+3. 结合已尝试查询、已有 Evidence 和证据不足原因，避免重复原查询。
+4. 生成一个适合 Vector → Rerank → Evidence Selector 链路的自然语言检索问题。
+5. 顶层必须是 JSON 对象，只能包含 retrieval_query 和 reason 两个字段。
+
+JSON 协议：
+{{
+  "retrieval_query": "改写后的单个合同检索问题",
+  "reason": "本次改写覆盖了哪些遗漏表达"
+}}
+
+rule_basis：
+{item.rule_basis}
+
+review_goal：
+{item.review_goal}
+
+已尝试查询：
+{json.dumps(attempted_queries, ensure_ascii=False, indent=2)}
+
+已有合同 Evidence：
+{json.dumps(evidence_payload, ensure_ascii=False, indent=2)}
+
+证据不足上下文：
+{json.dumps(insufficient_context, ensure_ascii=False, indent=2)}
 """

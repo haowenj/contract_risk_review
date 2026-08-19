@@ -35,6 +35,11 @@ class ReviewItemList(StrictModel):
         return self
 
 
+class RetrievalQueryRewrite(StrictModel):
+    retrieval_query: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
 class Evidence(BaseModel):
     model_config = ConfigDict(extra="allow", str_strip_whitespace=True)
 

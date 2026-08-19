@@ -115,13 +115,25 @@ class FakeLLM:
 
 
 class EvidenceOnlyPipeline:
-    def __init__(self, selected_nodes):
+    def __init__(self, selected_nodes, reranked_results=None):
         self.selected_nodes = selected_nodes
+        self.reranked_results = (
+            selected_nodes if reranked_results is None else reranked_results
+        )
         self.calls = []
 
-    def retrieve_evidence(self, index, query):
-        self.calls.append((index, query))
-        return {"selected_nodes": self.selected_nodes}
+    def retrieve_evidence(
+        self,
+        index,
+        query,
+        *,
+        fallback_on_empty_selection=True,
+    ):
+        self.calls.append((index, query, fallback_on_empty_selection))
+        return {
+            "selected_nodes": self.selected_nodes,
+            "reranked_results": self.reranked_results,
+        }
 
     def run(self, *args, **kwargs):
         raise AssertionError("answer pipeline must not be called")
@@ -241,7 +253,43 @@ class ContractSearchTest(TestCase):
         self.assertEqual(evidence[0]["page_idx"], 4)
         self.assertEqual(evidence[0]["node_type"], "image")
         index_manager.get.assert_called_once_with(ready)
-        self.assertEqual(pipeline.calls, [(index_manager.get.return_value, "收款账号")])
+        self.assertEqual(
+            pipeline.calls,
+            [(index_manager.get.return_value, "收款账号", False)],
+        )
+
+    def test_search_contract_reports_rerank_top_three_only_when_evidence_is_empty(self):
+        with TemporaryDirectory() as temp_dir:
+            reranked_results = [
+                result_for(1, "候选一", 0.9),
+                result_for(2, "候选二", 0.8),
+                result_for(3, "候选三", 0.7),
+                result_for(4, "候选四", 0.6),
+            ]
+            service, _, _ = self._build_service(Path(temp_dir), [])
+            service.rag_pipeline.reranked_results = reranked_results
+            contract = service.repository.create(
+                "contract.pdf",
+                Path(temp_dir) / "contract",
+            )
+            service.repository.update_status(contract.contract_id, "ready")
+            debug_payloads = []
+
+            evidence = service.search_contract(
+                contract.contract_id,
+                "分包约定",
+                debug_callback=debug_payloads.append,
+            )
+
+        self.assertEqual(evidence, [])
+        self.assertEqual(
+            debug_payloads,
+            [[
+                {"source_object_index": 1, "text": "候选一"},
+                {"source_object_index": 2, "text": "候选二"},
+                {"source_object_index": 3, "text": "候选三"},
+            ]],
+        )
 
     def test_search_contract_rejects_blank_query(self):
         with TemporaryDirectory() as temp_dir:

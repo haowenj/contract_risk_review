@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -115,7 +116,13 @@ class ContractService:
             **result,
         }
 
-    def search_contract(self, contract_id: str, query: str) -> list[dict[str, Any]]:
+    def search_contract(
+        self,
+        contract_id: str,
+        query: str,
+        *,
+        debug_callback: Callable[[list[dict[str, Any]]], None] | None = None,
+    ) -> list[dict[str, Any]]:
         if not query.strip():
             raise ValueError("query must not be empty")
 
@@ -126,10 +133,28 @@ class ContractService:
             raise ContractNotReadyError(contract)
 
         index = self.index_manager.get(contract)
-        retrieval = self.rag_pipeline.retrieve_evidence(index, query)
+        retrieval = self.rag_pipeline.retrieve_evidence(
+            index,
+            query,
+            fallback_on_empty_selection=False,
+        )
+        selected_nodes = retrieval.get("selected_nodes", [])
+        if not selected_nodes and debug_callback is not None:
+            debug_callback(
+                [
+                    {
+                        "source_object_index": serialized.get(
+                            "source_object_index"
+                        ),
+                        "text": serialized.get("text", ""),
+                    }
+                    for result in retrieval.get("reranked_results", [])[:3]
+                    for serialized in [serialize_node_result(result)]
+                ]
+            )
         return [
             serialize_node_result(result)
-            for result in retrieval.get("selected_nodes", [])
+            for result in selected_nodes
         ]
 
     def recover_interrupted_evaluation_runs(self) -> int:

@@ -36,6 +36,11 @@ EVIDENCE = {
     "evidence_text": "付款期限为180日",
 }
 
+QUERY_REWRITE = {
+    "retrieval_query": "乙方权利义务、转委托、第三方履约相关约定",
+    "reason": "扩展分包和转包的近义表达与相关章节名称",
+}
+
 
 class FakeLLM:
     def __init__(self, payload):
@@ -64,9 +69,25 @@ class FakeContractService:
         self.get_calls.append(contract_id)
         return self.contract
 
-    def search_contract(self, contract_id, query):
+    def search_contract(self, contract_id, query, *, debug_callback=None):
         self.searches.append((contract_id, query))
-        return [self.evidence] if self.evidence else []
+        evidence = [self.evidence] if self.evidence else []
+        if not evidence and debug_callback is not None:
+            debug_callback([])
+        return evidence
+
+
+class SequencedEvidenceContractService(FakeContractService):
+    def __init__(self, contract, evidence_sequences):
+        super().__init__(contract)
+        self.evidence_sequences = list(evidence_sequences)
+
+    def search_contract(self, contract_id, query, *, debug_callback=None):
+        self.searches.append((contract_id, query))
+        evidence = self.evidence_sequences.pop(0)
+        if not evidence and debug_callback is not None:
+            debug_callback([])
+        return evidence
 
 
 def build_service(contract_service, parse_payload=ITEMS, decision_payload=DECISION):
@@ -141,4 +162,25 @@ def test_service_runs_graph_and_returns_json_serializable_result():
     assert contract_service.get_calls == ["contract-1"]
     assert contract_service.searches == [
         ("contract-1", "合同约定的付款期限是多久")
+    ]
+
+
+def test_service_retries_with_rewritten_query_after_empty_evidence():
+    contract_service = SequencedEvidenceContractService(
+        ready_contract(),
+        evidence_sequences=[[], [EVIDENCE]],
+    )
+    service = ContractReviewService(
+        contract_service=contract_service,
+        parse_llm=FakeLLM(ITEMS),
+        review_llm=FakeLLM(DECISION),
+        query_rewrite_llm=FakeLLM(QUERY_REWRITE),
+    )
+
+    result = service.run("contract-1", "付款期限不得超过90日")
+
+    assert result["review_results"][0]["risk_status"] == "risk"
+    assert contract_service.searches == [
+        ("contract-1", "合同约定的付款期限是多久"),
+        ("contract-1", QUERY_REWRITE["retrieval_query"]),
     ]
