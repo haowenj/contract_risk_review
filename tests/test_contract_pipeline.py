@@ -235,7 +235,7 @@ class ContractProcessorTest(TestCase):
         self.assertEqual(captured["nodes"][1].metadata["node_type"], "table")
         self.assertEqual(captured["nodes"][1].metadata["page_idx"], 2)
 
-    def test_process_enriches_images_before_context_and_nodes(self):
+    def test_process_enriches_table_images_before_context_and_nodes(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             settings = self._settings(root)
@@ -250,8 +250,9 @@ class ContractProcessorTest(TestCase):
             )
             merged_objects = [
                 {
-                    "type": "image",
-                    "img_path": "images/general.jpg",
+                    "type": "table",
+                    "img_path": "images/general-table.jpg",
+                    "table_body": "<table><tr><td>营业执照</td></tr></table>",
                     "page_idx": 1,
                 }
             ]

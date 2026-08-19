@@ -201,10 +201,11 @@ def test_general_never_calls_ocr(tmp_path):
     assert ocr.calls == []
 
 
-def test_table_image_is_not_sent_to_vision_or_ocr(tmp_path):
+def test_table_image_is_enriched_in_place_without_ocr_for_general(tmp_path):
+    image_path = write_test_image(tmp_path, "images/table.jpg")
     table = {
         "type": "table",
-        "img_path": "images/table.jpg",
+        "img_path": image_path.relative_to(tmp_path).as_posix(),
         "table_body": "<table><tr><td>开户信息</td></tr></table>",
     }
     vision = FakeVision(general_extraction())
@@ -216,9 +217,38 @@ def test_table_image_is_not_sent_to_vision_or_ocr(tmp_path):
 
     enriched = service.enrich_images([table], storage_dir=tmp_path)
 
-    assert enriched == [table]
-    assert vision.calls == []
+    assert enriched[0]["type"] == "table"
+    assert enriched[0]["table_body"] == table["table_body"]
+    assert enriched[0]["image_type"] == "general"
+    assert enriched[0]["structured_data"]["visible_text"] == "印章"
+    assert vision.calls == [image_path]
     assert ocr.calls == []
+
+
+def test_bank_account_table_image_reuses_ocr_verification(tmp_path):
+    image_path = write_test_image(tmp_path, "images/account-table.jpg")
+    vision = FakeVision(bank_extraction())
+    ocr = FakeOCR("户名：甲公司\n开户银行：甲银行\n账号：110914414810101")
+    service = ContractImageIngestionService(
+        vision_service=vision,
+        ocr_service=ocr,
+    )
+
+    table = service.enrich_images(
+        [
+            {
+                "type": "table",
+                "img_path": image_path.relative_to(tmp_path).as_posix(),
+                "table_body": "<table><tr><td>银行资料</td></tr></table>",
+            }
+        ],
+        storage_dir=tmp_path,
+    )[0]
+
+    assert table["type"] == "table"
+    assert table["verification_status"] == "verified"
+    assert table["ocr_status"] == "ready"
+    assert ocr.calls == [image_path]
 
 
 def test_empty_general_result_is_recorded_without_ocr(tmp_path):

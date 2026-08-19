@@ -76,6 +76,20 @@ class MineruToNodesTest(TestCase):
                 "table_caption": ["付款计划"],
                 "table_footnote": ["以到账为准"],
                 "img_path": "images/payment-table.jpg",
+                "image_type": "bank_account",
+                "structured_data": {
+                    "account_name": "甲公司",
+                    "account_number": "110914414810101",
+                    "bank_name": "甲银行",
+                    "bank_branch": None,
+                },
+                "ocr_text": "账号：110914414810101",
+                "ocr_status": "ready",
+                "verification_status": "verified",
+                "verification_details": {
+                    "account_number": {"status": "verified"}
+                },
+                "image_processing_status": "ready",
                 "page_idx": 2,
                 "bbox": [1, 2, 3, 4],
             }
@@ -97,7 +111,10 @@ class MineruToNodesTest(TestCase):
         self.assertEqual(node.metadata["table_caption"], ["付款计划"])
         self.assertEqual(node.metadata["table_footnote"], ["以到账为准"])
         self.assertEqual(node.metadata["img_path"], "images/payment-table.jpg")
+        self.assertEqual(node.metadata["image_type"], "bank_account")
+        self.assertEqual(node.metadata["verification_status"], "verified")
         self.assertIn("付款比例", node.text)
+        self.assertIn("110914414810101", node.text)
         self.assertIn("30%", node.get_content(metadata_mode=MetadataMode.EMBED))
         self.assertIn(
             "付款条款表格",

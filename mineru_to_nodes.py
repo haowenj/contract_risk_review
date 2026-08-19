@@ -151,6 +151,15 @@ def build_nodes(
             "table_caption": obj.get("table_caption"),
             "table_footnote": obj.get("table_footnote"),
             "img_path": obj.get("img_path"),
+            "image_type": obj.get("image_type"),
+            "structured_data": obj.get("structured_data"),
+            "ocr_text": obj.get("ocr_text"),
+            "ocr_status": obj.get("ocr_status"),
+            "verification_status": obj.get("verification_status"),
+            "verification_details": obj.get("verification_details"),
+            "image_processing_status": obj.get("image_processing_status"),
+            "image_schema_version": obj.get("image_schema_version"),
+            "image_model": obj.get("image_model"),
         }
         metadata = {
             key: value

@@ -135,7 +135,15 @@ class ContractProcessor:
                 raise ValueError("merged content list must contain a JSON list")
 
             if any(
-                isinstance(obj, dict) and obj.get("type") == "image"
+                isinstance(obj, dict)
+                and (
+                    obj.get("type") == "image"
+                    or (
+                        obj.get("type") == "table"
+                        and isinstance(obj.get("img_path"), str)
+                        and bool(obj["img_path"].strip())
+                    )
+                )
                 for obj in objects
             ):
                 image_service = (

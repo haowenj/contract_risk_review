@@ -252,6 +252,12 @@ def test_evaluation_page_renders_table_image_in_all_retrieval_stages():
             "source_object_index": 7,
             "page_idx": 2,
             "img_path": "images/payment-table.jpg",
+            "image_type": "general",
+            "structured_data": {
+                "visible_text": "付款比例30%",
+                "content_description": "付款计划表",
+            },
+            "verification_status": "not_required",
             "evidence_text": "第1行：付款比例 | 30%",
         }
         service.latest_evaluation_run_payload.return_value = {
@@ -282,6 +288,7 @@ def test_evaluation_page_renders_table_image_in_all_retrieval_stages():
     assert response.status_code == 200
     assert response.text.count("表格原图") >= 3
     assert response.text.count("images/payment-table.jpg") >= 3
+    assert response.text.count("付款计划表") >= 3
 
 
 def test_all_run_route_schedules_background_execution():

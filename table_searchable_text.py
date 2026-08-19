@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from html.parser import HTMLParser
 from typing import Any
 
+from image_searchable_text import image_to_searchable_text
+
 
 class _TableHTMLParser(HTMLParser):
     def __init__(self) -> None:
@@ -94,5 +96,9 @@ def table_to_searchable_text(table: Mapping[str, Any]) -> str:
 
     for footnote in _field_values(table.get("table_footnote")):
         sections.append(f"表格注释：{footnote}")
+
+    image_text = image_to_searchable_text(table)
+    if image_text:
+        sections.append(f"图片识别补充：\n{image_text}")
 
     return "\n".join(sections) or "表格"

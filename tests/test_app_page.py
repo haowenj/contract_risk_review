@@ -233,6 +233,12 @@ class ServerRenderedPageTest(TestCase):
                         "source_object_index": 7,
                         "page_idx": 2,
                         "img_path": "images/payment-table.jpg",
+                        "image_type": "general",
+                        "structured_data": {
+                            "visible_text": "付款比例30%",
+                            "content_description": "付款计划表",
+                        },
+                        "verification_status": "not_required",
                         "evidence_text": "第1行：付款比例 | 30%",
                     }
                 ],
@@ -249,3 +255,4 @@ class ServerRenderedPageTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("表格原图", response.text)
         self.assertIn("images/payment-table.jpg", response.text)
+        self.assertIn("付款计划表", response.text)

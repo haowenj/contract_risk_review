@@ -91,7 +91,15 @@ class ContractImageIngestionService:
     ) -> list[dict[str, Any]]:
         enriched = copy.deepcopy(objects)
         for source_object_index, image in enumerate(enriched):
-            if not isinstance(image, dict) or image.get("type") != "image":
+            if not isinstance(image, dict):
+                continue
+            object_type = image.get("type")
+            if object_type not in {"image", "table"}:
+                continue
+            if object_type == "table" and not (
+                isinstance(image.get("img_path"), str)
+                and image["img_path"].strip()
+            ):
                 continue
 
             image.update(copy.deepcopy(IMAGE_DERIVED_DEFAULTS))

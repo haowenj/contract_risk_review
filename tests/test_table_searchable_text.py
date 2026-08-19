@@ -46,3 +46,23 @@ class TableSearchableTextTest(TestCase):
 
     def test_table_to_searchable_text_uses_fixed_text_when_all_fields_are_empty(self):
         self.assertEqual(table_to_searchable_text({}), "表格")
+
+    def test_table_to_searchable_text_appends_structured_image_information(self):
+        searchable = table_to_searchable_text(
+            {
+                "table_body": "<table><tr><td>收款资料</td></tr></table>",
+                "image_type": "bank_account",
+                "structured_data": {
+                    "account_name": "甲公司",
+                    "account_number": "110914414810101",
+                    "bank_name": "甲银行",
+                    "bank_branch": None,
+                },
+                "verification_status": "verified",
+            }
+        )
+
+        self.assertIn("第1行：收款资料", searchable)
+        self.assertIn("图片识别补充：", searchable)
+        self.assertIn("户名：甲公司", searchable)
+        self.assertIn("银行账号：110914414810101", searchable)

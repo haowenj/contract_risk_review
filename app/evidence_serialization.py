@@ -64,7 +64,7 @@ def serialize_node_result(result: Any) -> dict[str, Any]:
                 "table_body",
                 "table_caption",
                 "table_footnote",
-                "img_path",
+                *_IMAGE_METADATA_KEYS,
             ),
         )
     elif node_type == "image":
