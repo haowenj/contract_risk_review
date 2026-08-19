@@ -27,6 +27,8 @@ def test_rewrite_prompt_requires_discriminating_absence_keywords():
     assert '"keywords"' in prompt
     assert "核心术语或具有业务区分度的短语" in prompt
     assert "不要单独输出“同意、批准、许可、责任、合同”" in prompt
+    assert "书面同意、书面批准、书面许可、书面授权" in prompt
+    assert "必须与当前审查主题组合" in prompt
     assert "不得增加、修改或放宽 rule_basis" in prompt
 
 

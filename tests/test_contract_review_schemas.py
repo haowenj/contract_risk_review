@@ -188,7 +188,29 @@ def test_retrieval_query_rewrite_normalizes_and_deduplicates_keywords():
     assert rewrite.keywords == ["分包", "转包", "ＦＥＮＢＡＯ", "转委托"]
 
 
-@pytest.mark.parametrize("keywords", [[], ["", "   "]])
+def test_retrieval_query_rewrite_drops_standalone_generic_approval_keywords():
+    rewrite = RetrievalQueryRewrite.model_validate(
+        {
+            "retrieval_query": "检索乙方分包审批限制",
+            "reason": "覆盖审批表达",
+            "keywords": [
+                "分包",
+                "书面同意",
+                "书面批准",
+                "书面授权",
+                "合同",
+                "分包须书面同意",
+            ],
+        }
+    )
+
+    assert rewrite.keywords == ["分包", "分包须书面同意"]
+
+
+@pytest.mark.parametrize(
+    "keywords",
+    [[], ["", "   "], ["书面同意", "批准", "合同"]],
+)
 def test_retrieval_query_rewrite_rejects_unusable_keywords(keywords):
     with pytest.raises(ValidationError, match="keywords"):
         RetrievalQueryRewrite.model_validate(

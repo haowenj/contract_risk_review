@@ -40,6 +40,22 @@ def _normalize_keyword_key(value: str) -> str:
     return "".join(unicodedata.normalize("NFKC", value).casefold().split())
 
 
+_GENERIC_SCAN_KEYWORDS = frozenset(
+    {
+        "同意",
+        "批准",
+        "许可",
+        "授权",
+        "责任",
+        "合同",
+        "书面同意",
+        "书面批准",
+        "书面许可",
+        "书面授权",
+    }
+)
+
+
 def _clean_keywords(value: Any) -> list[str]:
     if not isinstance(value, list):
         raise ValueError("keywords must be a list")
@@ -51,7 +67,11 @@ def _clean_keywords(value: Any) -> list[str]:
             raise ValueError("keywords must contain only strings")
         display_value = keyword.strip()
         normalized_key = _normalize_keyword_key(display_value)
-        if not normalized_key or normalized_key in seen:
+        if (
+            not normalized_key
+            or normalized_key in _GENERIC_SCAN_KEYWORDS
+            or normalized_key in seen
+        ):
             continue
         seen.add(normalized_key)
         cleaned.append(display_value)
