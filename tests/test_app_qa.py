@@ -315,3 +315,70 @@ class ContractSearchTest(TestCase):
                 service.search_contract(contract.contract_id, "问题")
 
         index_manager.get.assert_not_called()
+
+    def test_load_contract_content_objects_reads_ready_merged_content(self):
+        with TemporaryDirectory() as temp_dir:
+            service, _, index_manager = self._build_service(Path(temp_dir), [])
+            storage_dir = Path(temp_dir) / "contract"
+            storage_dir.mkdir()
+            expected = [{"type": "text", "text": "条款", "page_idx": 0}]
+            (storage_dir / "merged_content_list.json").write_text(
+                json.dumps(expected, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            contract = service.repository.create("contract.pdf", storage_dir)
+            service.repository.update_status(contract.contract_id, "ready")
+
+            actual = service.load_contract_content_objects(contract.contract_id)
+
+        self.assertEqual(actual, expected)
+        index_manager.get.assert_not_called()
+
+    def test_load_contract_content_objects_rejects_missing_or_non_ready_contract(self):
+        with TemporaryDirectory() as temp_dir:
+            service, _, index_manager = self._build_service(Path(temp_dir), [])
+            with self.assertRaises(ContractNotFoundError):
+                service.load_contract_content_objects("missing")
+
+            contract = service.repository.create(
+                "contract.pdf",
+                Path(temp_dir) / "queued-contract",
+            )
+            with self.assertRaises(ContractNotReadyError):
+                service.load_contract_content_objects(contract.contract_id)
+
+        index_manager.get.assert_not_called()
+
+    def test_load_contract_content_objects_rejects_missing_or_invalid_content_file(self):
+        invalid_payloads = [
+            "not-json",
+            json.dumps({"type": "text"}),
+            json.dumps([{"type": "text", "text": "条款"}, "invalid-member"]),
+        ]
+        with TemporaryDirectory() as temp_dir:
+            service, _, index_manager = self._build_service(Path(temp_dir), [])
+            missing_dir = Path(temp_dir) / "missing-file"
+            missing_dir.mkdir()
+            missing = service.repository.create("missing.pdf", missing_dir)
+            service.repository.update_status(missing.contract_id, "ready")
+            with self.assertRaises(FileNotFoundError):
+                service.load_contract_content_objects(missing.contract_id)
+
+            for index, payload in enumerate(invalid_payloads):
+                storage_dir = Path(temp_dir) / f"invalid-{index}"
+                storage_dir.mkdir()
+                (storage_dir / "merged_content_list.json").write_text(
+                    payload,
+                    encoding="utf-8",
+                )
+                contract = service.repository.create(
+                    f"invalid-{index}.pdf",
+                    storage_dir,
+                )
+                service.repository.update_status(contract.contract_id, "ready")
+                with self.subTest(payload=payload), self.assertRaises(
+                    (json.JSONDecodeError, ValueError)
+                ):
+                    service.load_contract_content_objects(contract.contract_id)
+
+        index_manager.get.assert_not_called()

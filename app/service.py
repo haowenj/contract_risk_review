@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -156,6 +157,25 @@ class ContractService:
             serialize_node_result(result)
             for result in selected_nodes
         ]
+
+    def load_contract_content_objects(
+        self,
+        contract_id: str,
+    ) -> list[dict[str, Any]]:
+        contract = self.repository.get(contract_id)
+        if contract is None:
+            raise ContractNotFoundError(contract_id)
+        if contract.status != "ready":
+            raise ContractNotReadyError(contract)
+
+        source_path = Path(contract.storage_dir) / "merged_content_list.json"
+        with source_path.open("r", encoding="utf-8") as source_file:
+            payload = json.load(source_file)
+        if not isinstance(payload, list):
+            raise ValueError("merged_content_list.json must contain a JSON array")
+        if any(not isinstance(value, dict) for value in payload):
+            raise ValueError("merged content objects must be JSON objects")
+        return payload
 
     def recover_interrupted_evaluation_runs(self) -> int:
         return self.evaluation_service.recover_interrupted_runs()
