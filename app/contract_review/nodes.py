@@ -25,6 +25,24 @@ from app.contract_review.state import ContractReviewState
 
 type ProgressCallback = Callable[[str, dict[str, Any]], None]
 
+_BOUNDED_ABSENCE_PREFIXES = (
+    "基于当前合同全文解析结果未发现",
+    "基于当前合同全文解析结果，未发现",
+    "基于当前合同全文解析结果,未发现",
+)
+_ABSOLUTE_ABSENCE_PHRASES = (
+    "肯定没有",
+    "绝对没有",
+    "确定没有",
+    "确认没有",
+    "完全没有",
+    "肯定不存在",
+    "绝对不存在",
+    "确定不存在",
+    "确认不存在",
+    "完全不存在",
+)
+
 
 class ContractReviewNodes:
     def __init__(
@@ -283,17 +301,17 @@ class ContractReviewNodes:
             decision = parse_llm_response(response, RiskDecision)
             if decision.evidence_status != "absence_verified":
                 raise ValueError("absence_result must return absence_verified")
-            forbidden = "合同肯定没有"
             if any(
-                forbidden in value
+                phrase in value
                 for value in (
                     decision.finding,
                     decision.risk_description,
                     decision.suggestion,
                 )
+                for phrase in _ABSOLUTE_ABSENCE_PHRASES
             ):
                 raise ValueError("absence_result used an absolute absence claim")
-            if "基于当前合同全文解析结果" not in decision.finding:
+            if not decision.finding.startswith(_BOUNDED_ABSENCE_PREFIXES):
                 raise ValueError(
                     "absence_result finding lacks parsed-content scope"
                 )

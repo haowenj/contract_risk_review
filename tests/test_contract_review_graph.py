@@ -463,6 +463,22 @@ def test_graph_returns_audited_absence_verified_after_two_empty_rag_results():
             **ABSENCE_DECISION,
             "finding": "未发现明确限制乙方分包或转包的条款。",
         },
+        {
+            **ABSENCE_DECISION,
+            "finding": "综合判断：基于当前合同全文解析结果，未发现分包限制条款。",
+        },
+        {
+            **ABSENCE_DECISION,
+            "finding": "基于当前合同全文解析结果，合同绝对不存在分包限制。",
+        },
+        {
+            **ABSENCE_DECISION,
+            "risk_description": "已确认没有任何分包限制条款。",
+        },
+        {
+            **ABSENCE_DECISION,
+            "suggestion": "由于合同完全不存在相关条款，建议补充。",
+        },
     ],
 )
 def test_absence_result_rejects_invalid_or_absolute_decisions(invalid_decision):

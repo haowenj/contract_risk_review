@@ -40,6 +40,16 @@ def _normalize_keyword_key(value: str) -> str:
     return "".join(unicodedata.normalize("NFKC", value).casefold().split())
 
 
+def _strip_surrounding_punctuation(value: str) -> str:
+    start = 0
+    end = len(value)
+    while start < end and unicodedata.category(value[start]).startswith("P"):
+        start += 1
+    while end > start and unicodedata.category(value[end - 1]).startswith("P"):
+        end -= 1
+    return value[start:end].strip()
+
+
 _GENERIC_SCAN_KEYWORDS = frozenset(
     {
         "同意",
@@ -65,7 +75,7 @@ def _clean_keywords(value: Any) -> list[str]:
     for keyword in value:
         if not isinstance(keyword, str):
             raise ValueError("keywords must contain only strings")
-        display_value = keyword.strip()
+        display_value = _strip_surrounding_punctuation(keyword.strip())
         normalized_key = _normalize_keyword_key(display_value)
         if (
             not normalized_key

@@ -207,6 +207,18 @@ def test_retrieval_query_rewrite_drops_standalone_generic_approval_keywords():
     assert rewrite.keywords == ["分包", "分包须书面同意"]
 
 
+def test_retrieval_query_rewrite_drops_punctuated_generic_keywords():
+    rewrite = RetrievalQueryRewrite.model_validate(
+        {
+            "retrieval_query": "检索乙方分包审批限制",
+            "reason": "覆盖审批表达",
+            "keywords": ["同意。", "（批准）", "“合同”：", "乙方分包"],
+        }
+    )
+
+    assert rewrite.keywords == ["乙方分包"]
+
+
 @pytest.mark.parametrize(
     "keywords",
     [[], ["", "   "], ["书面同意", "批准", "合同"]],

@@ -40,6 +40,7 @@ def test_absence_result_prompt_requires_bounded_absence_wording():
 
     assert "基于当前合同全文解析结果" in prompt
     assert "合同肯定没有" in prompt
+    assert "绝对不存在、确认没有、完全不存在" in prompt
     assert "不得使用" in prompt
     assert "absence_verified" in prompt
     assert "两次语义检索" in prompt
