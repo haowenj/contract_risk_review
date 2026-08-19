@@ -201,6 +201,33 @@ def test_general_never_calls_ocr(tmp_path):
     assert ocr.calls == []
 
 
+def test_empty_general_result_is_recorded_without_ocr(tmp_path):
+    image_path = write_test_image(tmp_path, "images/empty.jpg")
+    empty_general = validate_image_extraction(
+        {
+            "image_type": "general",
+            "data": {
+                "visible_text": None,
+                "content_description": None,
+            },
+        }
+    )
+    ocr = FakeOCR("must not be called")
+    service = ContractImageIngestionService(
+        vision_service=FakeVision(empty_general),
+        ocr_service=ocr,
+    )
+
+    image = service.enrich_images(
+        [{"type": "image", "img_path": image_path.relative_to(tmp_path).as_posix()}],
+        storage_dir=tmp_path,
+    )[0]
+
+    assert image["image_processing_status"] == "empty_result"
+    assert image["ocr_status"] == "not_required"
+    assert ocr.calls == []
+
+
 def test_ocr_failure_keeps_bank_structured_data(tmp_path):
     image_path = write_test_image(tmp_path, "images/account.jpg")
     service = ContractImageIngestionService(

@@ -147,6 +147,11 @@ class ContractImageIngestionService:
             image["image_model"] = getattr(
                 self.vision_service, "model_name", None
             )
+            if not any(
+                isinstance(value, str) and value.strip()
+                for value in structured_data.values()
+            ):
+                image["image_processing_status"] = "empty_result"
 
             if image_type == "general":
                 image["ocr_status"] = "not_required"
