@@ -65,6 +65,69 @@ _GENERIC_SCAN_KEYWORDS = frozenset(
     }
 )
 
+_APPROVAL_TERMS = (
+    "书面同意书",
+    "书面批准书",
+    "书面许可书",
+    "书面授权书",
+    "同意书",
+    "批准书",
+    "许可书",
+    "授权书",
+    "同意",
+    "批准",
+    "许可",
+    "授权",
+    "认可",
+    "确认",
+)
+_GENERIC_APPROVAL_PARTS = tuple(
+    sorted(
+        {
+            *_APPROVAL_TERMS,
+            "甲方",
+            "乙方",
+            "双方",
+            "各方",
+            "一方",
+            "对方",
+            "相关方",
+            "当事人",
+            "事先",
+            "预先",
+            "提前",
+            "书面",
+            "须经",
+            "需经",
+            "应经",
+            "未经",
+            "获得",
+            "取得",
+            "经",
+            "的",
+        },
+        key=len,
+        reverse=True,
+    )
+)
+
+
+def _is_generic_scan_keyword(normalized_key: str) -> bool:
+    classification_key = "".join(
+        character
+        for character in normalized_key
+        if not unicodedata.category(character).startswith("P")
+    )
+    if classification_key in _GENERIC_SCAN_KEYWORDS:
+        return True
+    if not any(term in classification_key for term in _APPROVAL_TERMS):
+        return False
+
+    residual = classification_key
+    for part in _GENERIC_APPROVAL_PARTS:
+        residual = residual.replace(part, "")
+    return not residual
+
 
 def _clean_keywords(value: Any) -> list[str]:
     if not isinstance(value, list):
@@ -79,7 +142,7 @@ def _clean_keywords(value: Any) -> list[str]:
         normalized_key = _normalize_keyword_key(display_value)
         if (
             not normalized_key
-            or normalized_key in _GENERIC_SCAN_KEYWORDS
+            or _is_generic_scan_keyword(normalized_key)
             or normalized_key in seen
         ):
             continue
