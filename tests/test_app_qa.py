@@ -1,7 +1,10 @@
 import json
 import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest import TestCase
+from unittest.mock import Mock
 
 os.environ.setdefault("LLM_API_KEY", "test-key")
 os.environ.setdefault("LLM_BASE_URL", "https://llm.test/v1")
@@ -10,6 +13,13 @@ os.environ.setdefault("LLM_MODEL", "test-answer-model")
 os.environ.setdefault("LLM_RERANK_MODEL", "qwen3-rerank")
 
 from app.qa import answer_question
+from app.config import Settings
+from app.db import ContractRepository
+from app.service import (
+    ContractNotFoundError,
+    ContractNotReadyError,
+    ContractService,
+)
 
 
 def result_for(index: int, text: str, score: float):
@@ -104,6 +114,19 @@ class FakeLLM:
         return SimpleNamespace(content=json.dumps(self.payload, ensure_ascii=False))
 
 
+class EvidenceOnlyPipeline:
+    def __init__(self, selected_nodes):
+        self.selected_nodes = selected_nodes
+        self.calls = []
+
+    def retrieve_evidence(self, index, query):
+        self.calls.append((index, query))
+        return {"selected_nodes": self.selected_nodes}
+
+    def run(self, *args, **kwargs):
+        raise AssertionError("answer pipeline must not be called")
+
+
 class AppQATest(TestCase):
     def test_answer_question_returns_selected_evidence_and_optional_debug(self):
         index = FakeIndex([result_for(1, "付款条款", 0.8), result_for(2, "付款期限", 0.7)])
@@ -174,3 +197,73 @@ class AppQATest(TestCase):
         self.assertEqual(evidence["verification_status"], "verified")
         self.assertEqual(evidence["evidence_text"], "银行账号：110914414810101")
         self.assertEqual(result["debug"]["rerank_top10"][0]["img_path"], "images/account.jpg")
+
+
+class ContractSearchTest(TestCase):
+    def _build_service(self, root: Path, selected_nodes):
+        settings = Settings(
+            project_dir=root,
+            data_dir=root / "data",
+            database_path=root / "data" / "contracts.db",
+            contracts_dir=root / "data" / "contracts",
+            mineru_url="http://mineru.test",
+            mineru_backend="hybrid-engine",
+            mineru_server_url=None,
+        )
+        repository = ContractRepository(settings.database_path)
+        index_manager = Mock()
+        index_manager.get.return_value = object()
+        pipeline = EvidenceOnlyPipeline(selected_nodes)
+        service = ContractService(
+            repository,
+            settings,
+            Mock(),
+            index_manager,
+            rag_pipeline=pipeline,
+        )
+        return service, pipeline, index_manager
+
+    def test_search_contract_returns_serialized_rag_evidence_without_answer(self):
+        with TemporaryDirectory() as temp_dir:
+            service, pipeline, index_manager = self._build_service(
+                Path(temp_dir),
+                [image_result_for(12, "银行账号：110914414810101")],
+            )
+            contract = service.repository.create(
+                "contract.pdf",
+                Path(temp_dir) / "contract",
+            )
+            ready = service.repository.update_status(contract.contract_id, "ready")
+
+            evidence = service.search_contract(contract.contract_id, "收款账号")
+
+        self.assertEqual(evidence[0]["source_object_index"], 12)
+        self.assertEqual(evidence[0]["page_idx"], 4)
+        self.assertEqual(evidence[0]["node_type"], "image")
+        index_manager.get.assert_called_once_with(ready)
+        self.assertEqual(pipeline.calls, [(index_manager.get.return_value, "收款账号")])
+
+    def test_search_contract_rejects_blank_query(self):
+        with TemporaryDirectory() as temp_dir:
+            service, _, index_manager = self._build_service(Path(temp_dir), [])
+
+            with self.assertRaisesRegex(ValueError, "query must not be empty"):
+                service.search_contract("contract-id", "  ")
+
+        index_manager.get.assert_not_called()
+
+    def test_search_contract_requires_existing_ready_contract(self):
+        with TemporaryDirectory() as temp_dir:
+            service, _, index_manager = self._build_service(Path(temp_dir), [])
+
+            with self.assertRaises(ContractNotFoundError):
+                service.search_contract("missing", "问题")
+
+            contract = service.repository.create(
+                "contract.pdf",
+                Path(temp_dir) / "contract",
+            )
+            with self.assertRaises(ContractNotReadyError):
+                service.search_contract(contract.contract_id, "问题")
+
+        index_manager.get.assert_not_called()

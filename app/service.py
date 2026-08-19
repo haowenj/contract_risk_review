@@ -7,6 +7,7 @@ from app.config import Settings
 from app.db import ContractRepository
 from app.evaluation_db import EvaluationRepository
 from app.evaluation_service import EvaluationService
+from app.evidence_serialization import serialize_node_result
 from app.index_manager import IndexManager
 from app.models import ContractRecord
 from app.qa import answer_question
@@ -113,6 +114,23 @@ class ContractService:
             "question": question,
             **result,
         }
+
+    def search_contract(self, contract_id: str, query: str) -> list[dict[str, Any]]:
+        if not query.strip():
+            raise ValueError("query must not be empty")
+
+        contract = self.repository.get(contract_id)
+        if contract is None:
+            raise ContractNotFoundError(contract_id)
+        if contract.status != "ready":
+            raise ContractNotReadyError(contract)
+
+        index = self.index_manager.get(contract)
+        retrieval = self.rag_pipeline.retrieve_evidence(index, query)
+        return [
+            serialize_node_result(result)
+            for result in retrieval.get("selected_nodes", [])
+        ]
 
     def recover_interrupted_evaluation_runs(self) -> int:
         return self.evaluation_service.recover_interrupted_runs()

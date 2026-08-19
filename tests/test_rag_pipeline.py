@@ -68,6 +68,22 @@ def test_pipeline_runs_retrieve_rerank_selector_and_answer_without_gold_semantic
     assert index.similarity_top_k == 10
 
 
+def test_pipeline_retrieves_reranks_and_selects_evidence_without_answer_generation():
+    index = FakeIndex([result_for(10, "证据")])
+
+    result = RAGPipeline().retrieve_evidence(
+        index,
+        "问题",
+        reranker=FakeReranker(),
+        selector_llm=FakeLLM({"evidence_indices": [10]}),
+    )
+
+    assert result["query"] == "问题"
+    assert result["selected_indices"] == [10]
+    assert [item.node.text for item in result["selected_nodes"]] == ["证据"]
+    assert "llm_summary" not in result
+
+
 def test_pipeline_rejects_blank_questions():
     with pytest.raises(ValueError, match="question must not be empty"):
         RAGPipeline().run(FakeIndex([]), "  ")

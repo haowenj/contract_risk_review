@@ -11,14 +11,13 @@ PIPELINE_VERSION = "rag-v1"
 class RAGPipeline:
     """Shared single-question retrieve, rerank, select, and answer pipeline."""
 
-    def run(
+    def retrieve_evidence(
         self,
         index: Any,
         question: str,
         *,
         reranker: Any | None = None,
         selector_llm: Any | None = None,
-        answer_llm: Any | None = None,
     ) -> dict[str, Any]:
         if not question.strip():
             raise ValueError("question must not be empty")
@@ -37,19 +36,38 @@ class RAGPipeline:
             reranked_results,
             selected_indices,
         )
-        answer = retrieval_evaluation.generate_answer(
-            question,
-            selected_nodes,
-            llm=answer_llm,
-        )
         return {
             "query": question,
             "vector_results": vector_results,
             "reranked_results": reranked_results,
             "selected_indices": selected_indices,
             "selected_nodes": selected_nodes,
+        }
+
+    def run(
+        self,
+        index: Any,
+        question: str,
+        *,
+        reranker: Any | None = None,
+        selector_llm: Any | None = None,
+        answer_llm: Any | None = None,
+    ) -> dict[str, Any]:
+        result = self.retrieve_evidence(
+            index,
+            question,
+            reranker=reranker,
+            selector_llm=selector_llm,
+        )
+        answer = retrieval_evaluation.generate_answer(
+            question,
+            result["selected_nodes"],
+            llm=answer_llm,
+        )
+        return {
+            **result,
             "llm_summary": {
                 "answer": answer,
-                "evidence_indices": selected_indices,
+                "evidence_indices": result["selected_indices"],
             },
         }
