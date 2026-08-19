@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.contract_review.graph import build_contract_review_graph
 from app.contract_review.nodes import ContractReviewNodes
 from app.contract_review.schemas import ReviewItem, ReviewResult
 
@@ -228,3 +229,42 @@ def test_node_failures_include_stage_context_and_preserve_cause():
     with pytest.raises(RuntimeError, match="review_item item_1 failed") as review_error:
         review_nodes.review_item(initial_state(review_items=[item]))
     assert str(review_error.value.__cause__) == "rerank unavailable"
+
+
+def test_real_graph_loops_sequentially_and_accumulates_results():
+    second_decision = {
+        **RISK_DECISION,
+        "risk_status": "no_obvious_risk",
+        "risk_level": None,
+        "finding": "延期履约责任约定明确。",
+        "risk_description": "未发现明显风险。",
+        "suggestion": "保持现有条款。",
+    }
+    second_evidence = {
+        **EVIDENCE,
+        "source_object_index": 99,
+        "page_idx": 12,
+        "node_type": "text",
+        "text": "延期履约按日承担违约金。",
+        "evidence_text": "延期履约按日承担违约金。",
+    }
+    contract_service = FakeContractService([EVIDENCE], [second_evidence])
+    nodes = ContractReviewNodes(
+        parse_llm=FakeLLM(ITEMS_PAYLOAD),
+        review_llm=FakeLLM(RISK_DECISION, second_decision),
+        contract_service=contract_service,
+    )
+    graph = build_contract_review_graph(nodes)
+
+    final_state = graph.invoke(initial_state())
+
+    assert [result.item_id for result in final_state["review_results"]] == [
+        "item_1",
+        "item_2",
+    ]
+    assert final_state["current_item_index"] == 2
+    assert final_state["summary"].total_items == 2
+    assert contract_service.searches == [
+        ("contract-1", "合同约定的付款期限是多久"),
+        ("contract-1", "延期履约需要承担什么违约责任"),
+    ]
