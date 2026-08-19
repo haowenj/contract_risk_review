@@ -13,6 +13,7 @@ from langchain_openai import ChatOpenAI
 from app.image_schemas import (
     IMAGE_RESPONSE_FORMAT,
     ImageExtraction,
+    ImageSchemaError,
     validate_image_extraction,
 )
 
@@ -104,4 +105,8 @@ class ImageUnderstandingService:
             ]
         )
         response = self._llm.invoke([message])
-        return validate_image_extraction(_response_payload(response))
+        try:
+            payload = _response_payload(response)
+        except ValueError as exc:
+            raise ImageSchemaError("invalid image response payload") from exc
+        return validate_image_extraction(payload)

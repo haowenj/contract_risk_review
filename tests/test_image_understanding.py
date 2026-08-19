@@ -71,6 +71,17 @@ def test_schema_failure_is_exposed_without_retry(tmp_path):
     assert len(llm.messages) == 1
 
 
+def test_non_json_response_is_reported_as_schema_error(tmp_path):
+    image_path = tmp_path / "account.jpg"
+    image_path.write_bytes(b"jpeg")
+    llm = Mock()
+    llm.invoke.return_value = SimpleNamespace(content="not-json")
+    service = ImageUnderstandingService(model_name="test-vl", llm=llm)
+
+    with pytest.raises(ImageSchemaError):
+        service.classify_and_extract(image_path)
+
+
 def test_default_llm_binds_strict_image_response_format():
     factory = Mock()
     model = factory.return_value
