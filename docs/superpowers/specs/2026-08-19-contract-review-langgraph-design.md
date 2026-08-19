@@ -145,11 +145,11 @@ current_item_index < len(review_items) ?
 service.run(contract_id, review_rule_text)
 ```
 
-服务在进入图前验证两个输入非空，并通过合同检索服务提前确认合同存在且为 `ready`。随后以干净的初始 State 调用编译后的 LangGraph，并返回包含审查项、逐项结果和汇总的普通字典。
+服务在进入图前验证两个输入非空，并只读取合同记录以确认合同存在且为 `ready`。这个前置校验不得加载索引、调用 `search_contract()` 或额外触发任何一次 RAG；第一次 RAG 只能发生在首个 `review_item` 节点。随后服务以干净的初始 State 调用编译后的 LangGraph，并返回包含审查项、逐项结果和汇总的普通字典。
 
 服务支持注入依赖用于测试，也提供默认构建函数，复用项目当前环境变量、数据库、embedding model、`IndexManager`、`ContractService` 和 LLM 配置。规则解析与风险判断使用 `temperature=0`、`max_retries=0`、`enable_thinking=false` 和严格 JSON Schema。
 
-可选进度回调接收结构化事件。服务本身不强制写终端，避免以后被 API 或其他后端代码复用。
+可选进度回调接收稳定的结构化事件，至少覆盖 `review_items_parsed`、`review_item_started`、`evidence_retrieved`、`review_item_completed` 和 `review_summary`。事件 payload 只包含可序列化数据。服务本身不强制写终端，命令行脚本只是一个回调消费者，后续 Web 可以复用同一接口。
 
 ### `scripts/test_contract_review.py`
 
@@ -274,6 +274,8 @@ serialized Evidence
 - RAG Evidence 引用原样进入 ReviewResult；
 - 空 Evidence 强制产生 `needs_review / insufficient / null`；
 - LLM 或检索异常向上抛出并终止流程。
+- Graph 前置合同校验不加载索引、不调用检索，首个 `review_item` 才触发第一次 RAG；
+- progress callback 按固定事件名收到可序列化的解析、取证、判断和汇总 payload。
 
 ### Graph and aggregation tests
 
