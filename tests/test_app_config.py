@@ -30,3 +30,18 @@ class SettingsTest(TestCase):
         self.assertEqual(settings.data_dir, Path("/tmp/rag-data"))
         self.assertEqual(settings.database_path, Path("/tmp/rag.db"))
         self.assertEqual(settings.contracts_dir, Path("/tmp/contracts"))
+
+    def test_load_settings_reads_image_vision_configuration(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "LLM_MODEL": "qwen-current-plus",
+                "IMAGE_VISION_MODEL": "qwen-test-vl",
+                "IMAGE_VISION_TIMEOUT_SECONDS": "180",
+            },
+            clear=False,
+        ):
+            settings = load_settings(Path("/project"))
+
+        self.assertEqual(settings.image_vision_model, "qwen-test-vl")
+        self.assertEqual(settings.image_vision_timeout_seconds, 180.0)
