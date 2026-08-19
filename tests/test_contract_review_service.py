@@ -42,6 +42,15 @@ QUERY_REWRITE = {
     "keywords": ["分包", "转包", "转委托", "委托第三方"],
 }
 
+ABSENCE_DECISION = {
+    "risk_status": "risk",
+    "risk_level": "medium",
+    "evidence_status": "absence_verified",
+    "finding": "基于当前合同全文解析结果，未发现明确限制乙方分包或转包的条款。",
+    "risk_description": "两次语义检索及全文关键词核验均未发现对应约定。",
+    "suggestion": "建议补充未经书面同意不得分包或转包的明确条款。",
+}
+
 
 class FakeLLM:
     def __init__(self, payload):
@@ -60,11 +69,13 @@ class FakeLLM:
 
 
 class FakeContractService:
-    def __init__(self, contract=None, evidence=None):
+    def __init__(self, contract=None, evidence=None, source_objects=None):
         self.contract = contract
         self.evidence = EVIDENCE if evidence is None else evidence
+        self.source_objects = [] if source_objects is None else source_objects
         self.get_calls = []
         self.searches = []
+        self.content_loads = []
 
     def get_contract(self, contract_id):
         self.get_calls.append(contract_id)
@@ -77,10 +88,14 @@ class FakeContractService:
             debug_callback([])
         return evidence
 
+    def load_contract_content_objects(self, contract_id):
+        self.content_loads.append(contract_id)
+        return self.source_objects
+
 
 class SequencedEvidenceContractService(FakeContractService):
-    def __init__(self, contract, evidence_sequences):
-        super().__init__(contract)
+    def __init__(self, contract, evidence_sequences, *, source_objects=None):
+        super().__init__(contract, source_objects=source_objects)
         self.evidence_sequences = list(evidence_sequences)
 
     def search_contract(self, contract_id, query, *, debug_callback=None):
@@ -185,3 +200,30 @@ def test_service_retries_with_rewritten_query_after_empty_evidence():
         ("contract-1", "合同约定的付款期限是多久"),
         ("contract-1", QUERY_REWRITE["retrieval_query"]),
     ]
+
+
+def test_service_serializes_zero_candidate_absence_audit():
+    contract_service = SequencedEvidenceContractService(
+        ready_contract(),
+        evidence_sequences=[[], []],
+        source_objects=[
+            {"type": "text", "text": "付款与验收条款", "page_idx": 1},
+        ],
+    )
+    service = ContractReviewService(
+        contract_service=contract_service,
+        parse_llm=FakeLLM(ITEMS),
+        review_llm=FakeLLM(ABSENCE_DECISION),
+        query_rewrite_llm=FakeLLM(QUERY_REWRITE),
+    )
+
+    result = service.run("contract-1", "付款期限不得超过90日")
+
+    assert result["review_results"][0]["absence_check"] == {
+        "keywords": ["分包", "转包", "转委托", "委托第三方"],
+        "candidate_count": 0,
+    }
+    assert result["review_results"][0]["evidence_status"] == "absence_verified"
+    assert len(contract_service.searches) == 2
+    assert contract_service.content_loads == ["contract-1"]
+    json.dumps(result, ensure_ascii=False)

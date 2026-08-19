@@ -28,6 +28,10 @@ EVENT_HEADINGS = {
     "evidence_retrieved": "RAG 命中的 Evidence",
     "empty_evidence_rerank_debug": "Evidence 为空，Rerank Top3 Debug",
     "retrieval_query_rewritten": "证据不足，改写检索问题",
+    "absence_check_started": "开始全文缺失核验",
+    "absence_keywords_generated": "全文扫描关键词",
+    "absence_candidates_found": "全文扫描候选",
+    "absence_confirmed": "缺失核验结果",
     "review_item_completed": "本项风险结果",
     "review_summary": "最终汇总",
 }
