@@ -40,12 +40,20 @@ def _normalize_keyword_key(value: str) -> str:
     return "".join(unicodedata.normalize("NFKC", value).casefold().split())
 
 
+_SURROUNDING_KEYWORD_PUNCTUATION = frozenset(
+    "\"'“”‘’()（）[]【】{}《》〈〉「」『』。，、；;：:！？!?…"
+)
+
+
 def _strip_surrounding_punctuation(value: str) -> str:
     start = 0
     end = len(value)
-    while start < end and unicodedata.category(value[start]).startswith("P"):
+    while start < end and value[start] in _SURROUNDING_KEYWORD_PUNCTUATION:
         start += 1
-    while end > start and unicodedata.category(value[end - 1]).startswith("P"):
+    while (
+        end > start
+        and value[end - 1] in _SURROUNDING_KEYWORD_PUNCTUATION
+    ):
         end -= 1
     return value[start:end].strip()
 
@@ -103,6 +111,15 @@ _GENERIC_APPROVAL_PARTS = tuple(
             "未经",
             "获得",
             "取得",
+            "之后",
+            "以后",
+            "后方可",
+            "才允许",
+            "才可以",
+            "方可",
+            "才可",
+            "后",
+            "可",
             "经",
             "的",
         },

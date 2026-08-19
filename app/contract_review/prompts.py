@@ -144,7 +144,7 @@ def build_absence_result_prompt(
 1. 只依据当前 rule_basis、review_goal 和上述核验事实判断，不得增加输入中不存在的审查标准。
 2. 如果当前规则明确要求合同必须存在某项约定，可以据此判断缺失风险；风险等级必须结合当前规则本身判断，不得在规则之外另设标准。
 3. finding 必须使用“基于当前合同全文解析结果，未发现……”这类限定表述。
-4. 不得使用“合同肯定没有……”“绝对不存在、确认没有、完全不存在……”等绝对表述，也不得声称核验覆盖了解析结果之外的原始内容。
+4. 不得使用“合同肯定没有……”“绝对不存在、确认没有、完全不存在、根本不存在、断定合同没有……”等绝对表述，也不得声称核验覆盖了解析结果之外的原始内容。
 5. evidence_status 必须为 absence_verified。
 6. risk_status=risk 时必须给出 high、medium 或 low；其他状态的 risk_level 必须为 null。
 7. 顶层必须是 JSON 对象，只能包含 risk_status、risk_level、evidence_status、finding、risk_description、suggestion 六个字段；不得添加引用字段、扫描元数据或其他字段。

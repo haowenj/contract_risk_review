@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Callable
 from typing import Any
 
@@ -36,12 +37,21 @@ _ABSOLUTE_ABSENCE_PHRASES = (
     "确定没有",
     "确认没有",
     "完全没有",
+    "根本没有",
+    "断定没有",
+    "断定合同没有",
     "肯定不存在",
     "绝对不存在",
     "确定不存在",
     "确认不存在",
     "完全不存在",
+    "根本不存在",
+    "断定不存在",
 )
+
+
+def _normalize_absence_claim(value: str) -> str:
+    return "".join(unicodedata.normalize("NFKC", value).casefold().split())
 
 
 class ContractReviewNodes:
@@ -302,7 +312,7 @@ class ContractReviewNodes:
             if decision.evidence_status != "absence_verified":
                 raise ValueError("absence_result must return absence_verified")
             if any(
-                phrase in value
+                phrase in _normalize_absence_claim(value)
                 for value in (
                     decision.finding,
                     decision.risk_description,

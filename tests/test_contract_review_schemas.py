@@ -202,6 +202,8 @@ def test_retrieval_query_rewrite_drops_standalone_generic_approval_keywords():
                 "须经甲方书面批准",
                 "未经甲方书面授权",
                 "事先取得书面许可",
+                "经甲方书面同意后",
+                "经甲方批准后方可",
                 "合同",
                 "分包须书面同意",
             ],
@@ -216,11 +218,18 @@ def test_retrieval_query_rewrite_drops_punctuated_generic_keywords():
         {
             "retrieval_query": "检索乙方分包审批限制",
             "reason": "覆盖审批表达",
-            "keywords": ["同意。", "（批准）", "“合同”：", "乙方分包"],
+            "keywords": [
+                "同意。",
+                "（批准）",
+                "“合同”：",
+                "乙方分包",
+                "违约金5%",
+                "违约金5％",
+            ],
         }
     )
 
-    assert rewrite.keywords == ["乙方分包"]
+    assert rewrite.keywords == ["乙方分包", "违约金5%"]
 
 
 @pytest.mark.parametrize(
