@@ -1,0 +1,34 @@
+name: contract-risk-review
+
+services:
+  app:
+    image: contract-risk-review:0.1.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      LLM_BASE_URL: "${LLM_BASE_URL}"
+      LLM_API_KEY: "${LLM_API_KEY}"
+      LLM_MODEL: "${LLM_MODEL}"
+      LLM_EMBEDDING_MODEL: "${LLM_EMBEDDING_MODEL}"
+      LLM_RERANK_MODEL: "${LLM_RERANK_MODEL}"
+      LLM_RERANK_URL: "${LLM_RERANK_URL}"
+      APP_DATA_DIR: /app/data
+      APP_DATABASE_PATH: /app/data/contracts.db
+      APP_CONTRACTS_DIR: /app/data/contracts
+      PDF_TRANS_MINERU_URL: "${PDF_TRANS_MINERU_URL:-http://host.docker.internal:7100}"
+      PDF_TRANS_MINERU_BACKEND: "${PDF_TRANS_MINERU_BACKEND:-hybrid-engine}"
+      PDF_TRANS_MINERU_SERVER_URL: "${PDF_TRANS_MINERU_SERVER_URL:-}"
+      IMAGE_VISION_MODEL: "${IMAGE_VISION_MODEL:-}"
+      IMAGE_VISION_TIMEOUT_SECONDS: "${IMAGE_VISION_TIMEOUT_SECONDS:-120}"
+      RETRIEVAL_CONTEXT_LLM_MODEL: "${RETRIEVAL_CONTEXT_LLM_MODEL:-}"
+      RETRIEVAL_CONTEXT_LLM_TIMEOUT_SECONDS: "${RETRIEVAL_CONTEXT_LLM_TIMEOUT_SECONDS:-120}"
+      RAG_INPUT_PATH: /app/data/merged_content_list.json
+      RAG_RETRIEVAL_CONTEXT_PATH: /app/data/retrieval_context.json
+    volumes:
+      - ./data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
