@@ -308,6 +308,7 @@
           <div class="task-actions">
             {% if contract.status == "ready" %}
               <a class="button primary" href="/contracts/{{ contract.contract_id }}">开始问答</a>
+              <a class="button" href="/contracts/{{ contract.contract_id }}/review">风险评估</a>
               <a class="button" href="/contracts/{{ contract.contract_id }}/evaluation">召回测试</a>
               <button type="button" data-reprocess-contract-id="{{ contract.contract_id }}">重新解析</button>
             {% elif contract.status == "failed" %}
@@ -429,6 +430,11 @@
         link.href = `/contracts/${encodeURIComponent(contract.contract_id)}`;
         link.textContent = '开始问答';
         actions.append(link);
+        const reviewLink = document.createElement('a');
+        reviewLink.className = 'button';
+        reviewLink.href = `/contracts/${encodeURIComponent(contract.contract_id)}/review`;
+        reviewLink.textContent = '风险评估';
+        actions.append(reviewLink);
         const evaluationLink = document.createElement('a');
         evaluationLink.className = 'button';
         evaluationLink.href = `/contracts/${encodeURIComponent(contract.contract_id)}/evaluation`;

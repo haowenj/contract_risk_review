@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import logging
 import mimetypes
-from pathlib import Path
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
 from fastapi import (
@@ -35,15 +34,16 @@ from app.evaluation_service import (
 from app.index_manager import IndexManager
 from app.markdown import render_markdown
 from app.pipeline import ContractProcessor
+from app.review_db import ContractReviewRepository
+from app.review_service import ContractReviewWebService
 from app.service import (
-    ContractRawContentNotFoundError,
     ContractNotFoundError,
     ContractNotReadyError,
+    ContractRawContentNotFoundError,
     ContractReprocessNotAllowedError,
     ContractService,
 )
 from app.status import status_label
-
 
 logger = logging.getLogger(__name__)
 
@@ -87,10 +87,20 @@ def create_app(
     *,
     settings: Settings | None = None,
     service: ContractService | None = None,
+    contract_review_web_service: ContractReviewWebService | Any | None = None,
 ) -> FastAPI:
     settings = settings or load_settings()
     active_service = service or build_default_service(settings)
     active_service.evaluation_service.recover_interrupted_runs()
+    active_contract_review_web_service = (
+        contract_review_web_service
+        or ContractReviewWebService(
+            contract_service=active_service,
+            review_repository=ContractReviewRepository(settings.database_path),
+            review_runs_dir=settings.data_dir / "review_runs",
+        )
+    )
+    active_contract_review_web_service.recover_interrupted_runs()
     application = FastAPI(title="Contract Risk Review")
     templates = Jinja2Templates(
         directory=str(Path(__file__).resolve().parent / "templates")
@@ -190,6 +200,76 @@ def create_app(
                 debug=debug,
                 error="提问失败，请稍后重试。",
             )
+
+    def render_review_page(
+        request: Request,
+        contract_id: str,
+        *,
+        run_id: str | None = None,
+        review_rule_text: str = "",
+        error: str | None = None,
+        status_code: int = 200,
+    ) -> HTMLResponse:
+        selected_contract = active_service.get_contract(contract_id)
+        if selected_contract is None:
+            raise HTTPException(status_code=404, detail="contract not found")
+
+        review_run = None
+        if run_id:
+            try:
+                review_run = active_contract_review_web_service.get_run_payload(
+                    contract_id,
+                    run_id,
+                )
+            except KeyError as exc:
+                raise HTTPException(
+                    status_code=404,
+                    detail="review run not found",
+                ) from exc
+
+        if selected_contract.status != "ready" and error is None:
+            error = (
+                f"合同当前状态为 {status_label(selected_contract.status)}，"
+                "完成入库后才能进行风险评估。"
+            )
+
+        return templates.TemplateResponse(
+            request=request,
+            name="review.html",
+            status_code=status_code,
+            context={
+                "selected_contract": selected_contract,
+                "review_run": review_run,
+                "run_id": run_id,
+                "review_rule_text": review_rule_text,
+                "error": error,
+            },
+        )
+
+    async def resolve_review_rule_text(
+        review_rule_text: str,
+        review_rule_file: UploadFile | None,
+    ) -> str:
+        normalized_text = review_rule_text.strip()
+        has_file = bool(review_rule_file and review_rule_file.filename)
+        if normalized_text and has_file:
+            raise ValueError("请只选择一种审查规范输入方式。")
+        if normalized_text:
+            return normalized_text
+        if not has_file or review_rule_file is None:
+            raise ValueError("请输入或上传审查规范。")
+
+        suffix = Path(review_rule_file.filename or "").suffix.lower()
+        if suffix not in {".txt", ".md"}:
+            raise ValueError("审查规范文件仅支持 .txt 或 .md。")
+        try:
+            uploaded_text = (await review_rule_file.read()).decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise ValueError("审查规范文件必须使用 UTF-8 编码。") from exc
+        uploaded_text = uploaded_text.strip()
+        if not uploaded_text:
+            raise ValueError("上传的审查规范文件不能为空。")
+        return uploaded_text
 
     def evaluation_rows(
         cases: list[Any],
@@ -462,6 +542,24 @@ def create_app(
             raise HTTPException(status_code=404, detail="evaluation run not found")
         return payload
 
+    @application.get(
+        "/api/contracts/{contract_id}/review/runs/{run_id}"
+    )
+    def get_contract_review_run(
+        contract_id: str,
+        run_id: str,
+    ) -> dict[str, Any]:
+        try:
+            return active_contract_review_web_service.get_run_payload(
+                contract_id,
+                run_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail="review run not found",
+            ) from exc
+
     @application.post("/api/contracts/{contract_id}/chat")
     def chat(contract_id: str, request: ChatRequest) -> dict[str, Any]:
         try:
@@ -515,6 +613,68 @@ def create_app(
     @application.get("/contracts/{contract_id}", response_class=HTMLResponse)
     def contract_page(request: Request, contract_id: str) -> HTMLResponse:
         return render_chat_page(request, contract_id)
+
+    @application.get(
+        "/contracts/{contract_id}/review",
+        response_class=HTMLResponse,
+    )
+    def contract_review_page(
+        request: Request,
+        contract_id: str,
+        run_id: str | None = None,
+    ) -> HTMLResponse:
+        return render_review_page(request, contract_id, run_id=run_id)
+
+    @application.post(
+        "/contracts/{contract_id}/review/runs",
+        response_class=HTMLResponse,
+    )
+    async def create_contract_review_run(
+        request: Request,
+        contract_id: str,
+        background_tasks: BackgroundTasks,
+        review_rule_text: str = Form(default=""),
+        review_rule_file: UploadFile | None = File(default=None),
+    ) -> Response:
+        try:
+            normalized_text = await resolve_review_rule_text(
+                review_rule_text,
+                review_rule_file,
+            )
+            run = active_contract_review_web_service.create_run(
+                contract_id,
+                normalized_text,
+            )
+        except ContractNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="contract not found") from exc
+        except ContractNotReadyError as exc:
+            return render_review_page(
+                request,
+                contract_id,
+                review_rule_text=review_rule_text,
+                error=(
+                    f"合同当前状态为 {status_label(exc.record.status)}，"
+                    "完成入库后才能进行风险评估。"
+                ),
+                status_code=409,
+            )
+        except ValueError as exc:
+            return render_review_page(
+                request,
+                contract_id,
+                review_rule_text=review_rule_text,
+                error=str(exc),
+                status_code=400,
+            )
+
+        background_tasks.add_task(
+            active_contract_review_web_service.execute_run,
+            run.run_id,
+        )
+        return RedirectResponse(
+            url=f"/contracts/{contract_id}/review?run_id={run.run_id}",
+            status_code=303,
+        )
 
     @application.get(
         "/contracts/{contract_id}/evaluation",

@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ selected_contract.filename }} · 风险评估</title>
+  <style>
+    :root {
+      color: #172033;
+      background: #eef3f8;
+      font: 15px/1.6 "Avenir Next", "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    button, .button {
+      border: 1px solid #c5d2e1;
+      border-radius: 8px;
+      background: white;
+      color: #172033;
+      padding: 9px 14px;
+      font: inherit;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    button.primary, .button.primary {
+      border-color: #172033;
+      background: #172033;
+      color: white;
+    }
+    button:focus-visible, .button:focus-visible, textarea:focus-visible,
+    input:focus-visible, summary:focus-visible {
+      outline: 3px solid #93c5fd;
+      outline-offset: 2px;
+    }
+    .topbar {
+      min-height: 64px;
+      padding: 0 30px;
+      background: linear-gradient(90deg, #172033 0%, #25344f 100%);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+    .topbar strong { font-size: 18px; }
+    .topbar a { color: #d8e4f1; text-decoration: none; }
+    .shell { width: min(1080px, calc(100% - 40px)); margin: 30px auto 64px; }
+    .breadcrumb { margin-bottom: 15px; color: #5f7087; }
+    .breadcrumb a { color: #315b8c; text-decoration: none; }
+    .card {
+      padding: 22px;
+      border: 1px solid #d9e2ec;
+      border-radius: 14px;
+      background: white;
+      box-shadow: 0 8px 24px #1020380a;
+    }
+    .card + .card { margin-top: 18px; }
+    h1 { margin: 0; font-size: 23px; }
+    h2 { margin: 0 0 12px; font-size: 19px; }
+    h3 { margin: 0; font-size: 17px; }
+    .meta, .hint { color: #5f7087; }
+    .meta { margin: 5px 0 20px; }
+    .error {
+      margin-bottom: 16px;
+      padding: 12px 14px;
+      border: 1px solid #fecaca;
+      border-radius: 9px;
+      background: #fff7f7;
+      color: #b91c1c;
+    }
+    .rule-form { display: grid; gap: 18px; }
+    textarea {
+      width: 100%;
+      min-height: 230px;
+      border: 1px solid #c5d2e1;
+      border-radius: 10px;
+      padding: 12px;
+      font: inherit;
+      resize: vertical;
+    }
+    .upload-field {
+      padding: 16px;
+      border: 1px dashed #91a4bc;
+      border-radius: 10px;
+      background: #f8fbff;
+    }
+    .upload-field label { display: block; margin-bottom: 8px; font-weight: 650; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .run-status {
+      padding: 14px;
+      border-radius: 10px;
+      background: #f1f6fb;
+      color: #315b8c;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(130px, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .metric {
+      padding: 14px;
+      border-radius: 10px;
+      background: #eef4fa;
+    }
+    .metric small { display: block; color: #5f7087; }
+    .metric strong { font-size: 23px; }
+    .result-list { display: grid; gap: 14px; margin-top: 18px; }
+    .result-card {
+      padding: 18px;
+      border: 1px solid #d9e2ec;
+      border-radius: 12px;
+      background: #fbfdff;
+    }
+    .result-heading {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .badges { display: flex; gap: 7px; flex-wrap: wrap; justify-content: flex-end; }
+    .badge {
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: #e8eef5;
+      color: #41546c;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    .badge-risk { background: #fee2e2; color: #b91c1c; }
+    .badge-clear { background: #dcfce7; color: #15803d; }
+    .badge-review { background: #fef3c7; color: #a16207; }
+    .field {
+      display: grid;
+      grid-template-columns: 110px minmax(0, 1fr);
+      gap: 10px;
+      padding: 8px 0;
+      border-top: 1px solid #e2e8f0;
+    }
+    .field strong { color: #41546c; }
+    details {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border: 1px solid #d9e2ec;
+      border-radius: 9px;
+      background: white;
+    }
+    summary { cursor: pointer; font-weight: 650; }
+    .evidence {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid #e2e8f0;
+    }
+    .evidence-meta { color: #5f7087; font-size: 13px; }
+    .evidence-text { margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .absence-audit {
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 9px;
+      background: #fff8e8;
+    }
+    .absence-audit div + div { margin-top: 5px; }
+    @media (max-width: 760px) {
+      .topbar { padding: 0 18px; }
+      .shell { width: calc(100% - 24px); margin-top: 22px; }
+      .metrics { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+      .result-heading { display: block; }
+      .badges { justify-content: flex-start; margin-top: 9px; }
+      .field { grid-template-columns: 1fr; gap: 2px; }
+    }
+  </style>
+</head>
+<body
+  data-run-id="{{ run_id or '' }}"
+  data-run-status="{{ review_run.status if review_run else '' }}"
+>
+  <header class="topbar">
+    <strong>合同风险审阅 · 风险评估</strong>
+    <a href="/">← 返回合同任务</a>
+  </header>
+
+  <main class="shell">
+    <div class="breadcrumb">
+      <a href="/">合同任务</a> / {{ selected_contract.filename }} / 风险评估
+    </div>
+
+    <section class="card">
+      <h1>{{ selected_contract.filename }}</h1>
+      <p class="meta">合同状态：{{ selected_contract.status|status_label }}</p>
+      {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+
+      {% if not review_run and selected_contract.status == "ready" %}
+        <h2>审查规范</h2>
+        <p class="hint">可直接粘贴规范，或上传 UTF-8 编码的 .txt/.md 文件；请只选择一种输入方式。</p>
+        <form class="rule-form" action="/contracts/{{ selected_contract.contract_id }}/review/runs" method="post" enctype="multipart/form-data">
+          <div>
+            <label for="review-rule-text"><strong>手动粘贴</strong></label>
+            <textarea id="review-rule-text" name="review_rule_text" placeholder="粘贴审查规范文本">{{ review_rule_text }}</textarea>
+          </div>
+          <div class="upload-field">
+            <label for="review-rule-file">上传规范文件</label>
+            <input id="review-rule-file" name="review_rule_file" type="file" accept=".txt,.md,text/plain,text/markdown">
+          </div>
+          <div class="actions">
+            <button class="primary" type="submit">开始风险评估</button>
+          </div>
+        </form>
+      {% elif not review_run %}
+        <div class="run-status">当前合同尚未完成入库，暂时不能创建风险审查任务。</div>
+      {% endif %}
+    </section>
+
+    {% if review_run %}
+      <section class="card" id="review-run">
+        <h2>风险审查结果</h2>
+        {% if review_run.status in ["queued", "processing"] %}
+          <div class="run-status">
+            <strong id="run-status">{{ "排队中" if review_run.status == "queued" else "处理中" }}</strong>
+            <div id="progress-message">{{ review_run.progress.message or "等待开始风险审查" }}</div>
+          </div>
+        {% elif review_run.status == "failed" %}
+          <div class="error" role="alert">
+            风险审查失败{% if review_run.error_message %}：{{ review_run.error_message }}{% endif %}
+          </div>
+        {% elif review_run.status == "ready" %}
+          {% set result = review_run.result %}
+          {% set summary = result.summary %}
+          <div class="run-status">审查已完成</div>
+          <div class="metrics">
+            <div class="metric"><small>总审查项</small><strong>{{ summary.total_items }}</strong></div>
+            <div class="metric"><small>风险</small><strong>{{ summary.risk_count }}</strong></div>
+            <div class="metric"><small>未发现明显风险</small><strong>{{ summary.no_obvious_risk_count }}</strong></div>
+            <div class="metric"><small>需人工复核</small><strong>{{ summary.needs_review_count }}</strong></div>
+          </div>
+
+          <div class="result-list">
+            {% for item in result.review_results %}
+              <article class="result-card">
+                <div class="result-heading">
+                  <h3>{{ loop.index }}. {{ item.item_name }}</h3>
+                  <div class="badges">
+                    {% if item.risk_status == "risk" %}
+                      <span class="badge badge-risk">有风险</span>
+                    {% elif item.risk_status == "no_obvious_risk" %}
+                      <span class="badge badge-clear">未发现明显风险</span>
+                    {% else %}
+                      <span class="badge badge-review">需人工复核</span>
+                    {% endif %}
+                    <span class="badge">
+                      {% if item.risk_level == "high" %}高风险
+                      {% elif item.risk_level == "medium" %}中风险
+                      {% elif item.risk_level == "low" %}低风险
+                      {% else %}未分级{% endif %}
+                    </span>
+                  </div>
+                </div>
+                <div class="field"><strong>审查发现</strong><span>{{ item.finding }}</span></div>
+                <div class="field"><strong>风险说明</strong><span>{{ item.risk_description }}</span></div>
+                <div class="field"><strong>修改建议</strong><span>{{ item.suggestion }}</span></div>
+
+                <details>
+                  <summary>Evidence（{{ item.evidence|length }}）</summary>
+                  {% for evidence in item.evidence %}
+                    <div class="evidence">
+                      <div class="evidence-meta">
+                        page_idx：{{ evidence.page_idx if evidence.page_idx is defined and evidence.page_idx is not none else "—" }} ·
+                        source_object_index：{{ evidence.source_object_index }} ·
+                        node_type：{{ evidence.node_type }}
+                      </div>
+                      <div class="evidence-text">{{ evidence.evidence_text }}</div>
+                    </div>
+                  {% else %}
+                    <p class="hint">该审查项没有直接证据片段。</p>
+                  {% endfor %}
+                </details>
+
+                {% if item.evidence_status == "absence_verified" and item.absence_check %}
+                  <div class="absence-audit">
+                    <strong>全文缺失核验</strong>
+                    <div>primary_keywords：{{ item.absence_check.primary_keywords|join('、') }}</div>
+                    <div>secondary_keywords：{{ item.absence_check.secondary_keywords|join('、') if item.absence_check.secondary_keywords else '—' }}</div>
+                    <div>candidate_count：{{ item.absence_check.candidate_count }}</div>
+                  </div>
+                {% endif %}
+              </article>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </section>
+    {% endif %}
+  </main>
+
+  <script>
+    const runId = document.body.dataset.runId;
+    const initialStatus = document.body.dataset.runStatus;
+    const progressMessage = document.querySelector('#progress-message');
+    const runStatus = document.querySelector('#run-status');
+
+    async function pollRun() {
+      if (!runId) return;
+      try {
+        const response = await fetch(
+          `/api/contracts/{{ selected_contract.contract_id }}/review/runs/${encodeURIComponent(runId)}`,
+          { cache: 'no-store' },
+        );
+        if (!response.ok) return;
+        const payload = await response.json();
+        if (payload.status === 'queued' || payload.status === 'processing') {
+          if (runStatus) runStatus.textContent = payload.status === 'queued' ? '排队中' : '处理中';
+          if (progressMessage && payload.progress?.message) {
+            progressMessage.textContent = payload.progress.message;
+          }
+          window.setTimeout(pollRun, 2000);
+          return;
+        }
+        window.location.reload();
+      } catch (error) {
+        console.warn('review run polling failed', error);
+        window.setTimeout(pollRun, 3000);
+      }
+    }
+
+    if (runId && ['queued', 'processing'].includes(initialStatus)) {
+      window.setTimeout(pollRun, 1000);
+    }
+  </script>
+</body>
+</html>

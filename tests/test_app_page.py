@@ -74,6 +74,13 @@ class ServerRenderedPageTest(TestCase):
             self.assertEqual(home_response.status_code, 200)
             self.assertIn(f"/contracts/{contract.contract_id}", home_response.text)
             self.assertIn("开始问答", home_response.text)
+            self.assertIn(
+                f"/contracts/{contract.contract_id}/review",
+                home_response.text,
+            )
+            self.assertIn("风险评估", home_response.text)
+            self.assertIn("召回测试", home_response.text)
+            self.assertIn("重新解析", home_response.text)
             self.assertIn(">可问答<", home_response.text)
             self.assertEqual(chat_response.status_code, 200)
             self.assertIn("状态：可问答", chat_response.text)

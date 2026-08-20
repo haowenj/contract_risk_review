@@ -15,7 +15,6 @@ from app.contract_review.schemas import (
 )
 from app.service import ContractNotFoundError, ContractNotReadyError
 
-
 REVIEW_LLM_TIMEOUT_SECONDS = 120.0
 
 
@@ -124,6 +123,17 @@ def build_default_contract_review_service(
     from app.config import load_settings
 
     contract_service = build_default_service(load_settings())
+    return build_contract_review_service(
+        contract_service=contract_service,
+        progress_callback=progress_callback,
+    )
+
+
+def build_contract_review_service(
+    *,
+    contract_service: Any,
+    progress_callback: ProgressCallback | None = None,
+) -> ContractReviewService:
     return ContractReviewService(
         contract_service=contract_service,
         parse_llm=_build_structured_llm(
