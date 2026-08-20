@@ -66,9 +66,11 @@ def test_review_item_list_rejects_empty_items():
         ReviewItemList.model_validate({"review_items": []})
 
 
-def test_risk_decision_requires_level_for_risk():
-    with pytest.raises(ValidationError, match="risk_level"):
-        RiskDecision.model_validate({**DECISION, "risk_level": None})
+def test_risk_decision_allows_null_level_for_risk_status():
+    decision = RiskDecision.model_validate({**DECISION, "risk_level": None})
+
+    assert decision.risk_status == "risk"
+    assert decision.risk_level is None
 
 
 def test_non_risk_decision_rejects_risk_level():

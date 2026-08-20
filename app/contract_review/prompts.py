@@ -53,10 +53,11 @@ def build_review_item_prompt(
 2. 不得生成、猜测、复制或改写 source_object_index、page_idx、node_type 等证据引用字段；证据由程序附加。
 3. 如果证据不足以支持风险或无风险结论，返回 risk_status=needs_review、evidence_status=insufficient、risk_level=null。
 4. 没有检索到证据不等于合同没有约定，不得作此推断。
-5. risk_status=risk 时必须给出 high、medium 或 low；其他状态的 risk_level 必须为 null。
-6. 顶层必须是 JSON 对象，只能包含 risk_status、risk_level、evidence_status、finding、risk_description、suggestion 六个字段。
-7. risk_status 只能是 risk、no_obvious_risk、needs_review；evidence_status 只能是 found、insufficient。
-8. 不得输出 evidence 数组或任何证据引用字段。
+5. 只有 rule_basis 明确提供风险等级或可直接适用的分级依据时，risk_status=risk 才能给出 high、medium 或 low；审查规范没有提供风险等级或分级依据时，即使 risk_status=risk，也必须返回 risk_level=null。其他状态的 risk_level 必须为 null。
+6. risk_description 只解释合同事实与 rule_basis 的偏离，不得自行扩展法律后果、商业后果、行业影响或其他规范中未提供的风险。
+7. 顶层必须是 JSON 对象，只能包含 risk_status、risk_level、evidence_status、finding、risk_description、suggestion 六个字段。
+8. risk_status 只能是 risk、no_obvious_risk、needs_review；evidence_status 只能是 found、insufficient。
+9. 不得输出 evidence 数组或任何证据引用字段。
 
 JSON 协议：
 {{
@@ -64,7 +65,7 @@ JSON 协议：
   "risk_level": "high | medium | low | null",
   "evidence_status": "found | insufficient",
   "finding": "基于证据的审查发现",
-  "risk_description": "风险说明",
+  "risk_description": "仅说明合同事实与 rule_basis 的偏离",
   "suggestion": "修改或人工核对建议"
 }}
 
@@ -100,7 +101,7 @@ def build_retrieval_query_rewrite_prompt(
 3. 结合已尝试查询、已有 Evidence 和证据不足原因，避免重复原查询。
 4. 生成一个适合 Vector → Rerank → Evidence Selector 链路的自然语言检索问题。
 5. 同时生成用于合同全文确定性扫描的 primary_keywords 和 secondary_keywords。两组关键词都只能围绕当前 rule_basis 和 review_goal 扩展，不得形成新的风险审查标准。
-6. primary_keywords 是候选准入条件，必须是能够独立识别当前审查主题的核心术语或具有业务区分度的短语。禁止把“第三方、同意、批准、许可、转让”等脱离审查主题后仍具有大量其他含义的泛化词作为独立 primary keyword；应改成“第三方履行、权利义务转让、分包须书面同意”等主题短语。
+6. primary_keywords 是候选准入条件，优先使用能够独立识别当前审查主题的核心术语或具有业务区分度的短语；分包、转包、转委托本身可以作为 primary_keywords，不要为了增加长度而过度短语化。禁止把“第三方、同意、批准、许可、转让”等脱离审查主题后仍具有大量其他含义的泛化词作为独立 primary keyword；泛化词如确有需要，必须与当前主题组合，例如“第三方履行、权利义务转让、分包须书面同意”。
 7. secondary_keywords 用于补充命中信息和候选排序，可以包含与当前主题相关的主体、审批或行为辅助表达；secondary_keywords 不能独立形成候选。
 8. 两组关键词不得包含空字符串或各自重复项；同一个关键词不要同时放入两组。
 9. 顶层必须是 JSON 对象，只能包含 retrieval_query、reason、primary_keywords 和 secondary_keywords 四个字段。
@@ -149,8 +150,9 @@ def build_absence_result_prompt(
 3. finding 必须使用“基于当前合同全文解析结果，未发现……”这类限定表述。
 4. 不得使用“合同肯定没有……”“绝对不存在、确认没有、完全不存在、根本不存在、断定合同没有……”等绝对表述，也不得声称核验覆盖了解析结果之外的原始内容。
 5. evidence_status 必须为 absence_verified。
-6. risk_status=risk 时必须给出 high、medium 或 low；其他状态的 risk_level 必须为 null。
-7. 顶层必须是 JSON 对象，只能包含 risk_status、risk_level、evidence_status、finding、risk_description、suggestion 六个字段；不得添加引用字段、扫描元数据或其他字段。
+6. 只有 rule_basis 明确提供风险等级或可直接适用的分级依据时，risk_status=risk 才能给出 high、medium 或 low；审查规范没有提供风险等级或分级依据时，即使 risk_status=risk，也必须返回 risk_level=null。其他状态的 risk_level 必须为 null。
+7. risk_description 只解释核验事实与 rule_basis 的偏离，不得自行扩展法律后果、商业后果、行业影响或其他规范中未提供的风险。
+8. 顶层必须是 JSON 对象，只能包含 risk_status、risk_level、evidence_status、finding、risk_description、suggestion 六个字段；不得添加引用字段、扫描元数据或其他字段。
 
 JSON 协议：
 {{
@@ -158,7 +160,7 @@ JSON 协议：
   "risk_level": "high | medium | low | null",
   "evidence_status": "absence_verified",
   "finding": "基于当前合同全文解析结果，未发现与审查要求对应的明确条款",
-  "risk_description": "结合当前审查规范说明缺失可能造成的风险",
+  "risk_description": "仅说明全文核验事实与 rule_basis 的偏离",
   "suggestion": "仅针对当前审查规范提出补充或人工核对建议"
 }}
 

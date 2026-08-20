@@ -549,6 +549,7 @@ def test_aggregate_results_counts_all_statuses_without_llm():
     results = [
         result_for("risk", "high"),
         result_for("risk", "low"),
+        result_for("risk", None),
         result_for("no_obvious_risk"),
         result_for("needs_review"),
     ]
@@ -556,8 +557,8 @@ def test_aggregate_results_counts_all_statuses_without_llm():
     update = nodes.aggregate_results(initial_state(review_results=results))
 
     assert update["summary"].model_dump() == {
-        "total_items": 4,
-        "risk_count": 2,
+        "total_items": 5,
+        "risk_count": 3,
         "high_risk_count": 1,
         "medium_risk_count": 0,
         "low_risk_count": 1,

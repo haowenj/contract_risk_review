@@ -273,8 +273,6 @@ def _validate_risk_fields(
         raise ValueError(
             "insufficient evidence requires risk_status=needs_review"
         )
-    if risk_status == "risk" and risk_level is None:
-        raise ValueError("risk_status=risk requires a risk_level")
     if risk_status != "risk" and risk_level is not None:
         raise ValueError("risk_level must be null when risk_status is not risk")
 
