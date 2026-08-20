@@ -50,7 +50,7 @@ class ServerRenderedPageTest(TestCase):
             self.assertNotIn("请选择一份合同", response.text)
             self.assertIn('data-poll-interval="10000"', response.text)
 
-    def test_ready_contract_opens_independent_chat_page(self):
+    def test_ready_contract_shows_evaluation_entry_without_chat_module(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             settings = Settings(
@@ -69,11 +69,11 @@ class ServerRenderedPageTest(TestCase):
             client = TestClient(create_app(settings=settings, service=service))
 
             home_response = client.get("/")
-            chat_response = client.get(f"/contracts/{contract.contract_id}")
+            legacy_page_response = client.get(f"/contracts/{contract.contract_id}")
 
             self.assertEqual(home_response.status_code, 200)
-            self.assertIn(f"/contracts/{contract.contract_id}", home_response.text)
-            self.assertIn("开始问答", home_response.text)
+            self.assertNotIn(f'href="/contracts/{contract.contract_id}"', home_response.text)
+            self.assertNotIn("开始问答", home_response.text)
             self.assertIn(
                 f"/contracts/{contract.contract_id}/review",
                 home_response.text,
@@ -81,53 +81,9 @@ class ServerRenderedPageTest(TestCase):
             self.assertIn("风险评估", home_response.text)
             self.assertIn("召回测试", home_response.text)
             self.assertIn("重新解析", home_response.text)
-            self.assertIn(">可问答<", home_response.text)
-            self.assertEqual(chat_response.status_code, 200)
-            self.assertIn("状态：可问答", chat_response.text)
-            self.assertIn('name="question"', chat_response.text)
-            self.assertIn(
-                f'action="/contracts/{contract.contract_id}/chat"',
-                chat_response.text,
-            )
-
-    def test_page_renders_debug_sections_from_chat_result(self):
-        with TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            settings = Settings(
-                project_dir=root,
-                data_dir=root / "data",
-                database_path=root / "data" / "contracts.db",
-                contracts_dir=root / "data" / "contracts",
-                mineru_url="http://mineru.test",
-                mineru_backend="hybrid-engine",
-                mineru_server_url=None,
-            )
-            repository = ContractRepository(settings.database_path)
-            contract_dir = root / "contract"
-            contract = repository.create("contract.pdf", contract_dir)
-            repository.update_status(contract.contract_id, "ready")
-            service = Mock()
-            service.list_contracts.return_value = [repository.get(contract.contract_id)]
-            service.get_contract.return_value = repository.get(contract.contract_id)
-            service.ask.return_value = {
-                "answer": "**答案**",
-                "evidence": [{"text": "证据"}],
-                "debug": {
-                    "rerank_top10": [{"text": "候选"}],
-                    "selected_evidence": [{"text": "证据"}],
-                    "final_answer": "**答案**",
-                },
-            }
-            response = TestClient(create_app(settings=settings, service=service)).post(
-                f"/contracts/{contract.contract_id}/chat",
-                data={"contract_id": contract.contract_id, "question": "问题", "debug": "on"},
-            )
-
-            self.assertEqual(response.status_code, 200)
-            self.assertIn("Rerank Top10", response.text)
-            self.assertIn("Selected Evidence", response.text)
-            self.assertIn("<strong>答案</strong>", response.text)
-            self.assertNotIn("**答案**", response.text)
+            self.assertIn(">已就绪<", home_response.text)
+            self.assertNotIn("可问答", home_response.text)
+            self.assertEqual(legacy_page_response.status_code, 404)
 
     def test_failed_contract_shows_reprocess_action_and_chinese_status(self):
         with TemporaryDirectory() as temp_dir:
@@ -158,108 +114,3 @@ class ServerRenderedPageTest(TestCase):
             f'data-reprocess-contract-id="{contract.contract_id}"',
             response.text,
         )
-
-    def test_page_renders_image_evidence_with_original_reference(self):
-        with TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            settings = Settings(
-                project_dir=root,
-                data_dir=root / "data",
-                database_path=root / "data" / "contracts.db",
-                contracts_dir=root / "data" / "contracts",
-                mineru_url="http://mineru.test",
-                mineru_backend="hybrid-engine",
-                mineru_server_url=None,
-            )
-            repository = ContractRepository(settings.database_path)
-            contract_dir = root / "contract"
-            (contract_dir / "images").mkdir(parents=True)
-            (contract_dir / "images/account.jpg").write_bytes(b"jpeg")
-            contract = repository.create("contract.pdf", contract_dir)
-            repository.update_status(contract.contract_id, "ready")
-            service = Mock()
-            service.list_contracts.return_value = [repository.get(contract.contract_id)]
-            service.get_contract.return_value = repository.get(contract.contract_id)
-            service.ask.return_value = {
-                "answer": "账号为110914414810101。",
-                "evidence": [
-                    {
-                        "node_type": "image",
-                        "source_object_index": 12,
-                        "page_idx": 4,
-                        "img_path": "images/account.jpg",
-                        "image_type": "bank_account",
-                        "structured_data": {"account_number": "110914414810101"},
-                        "verification_status": "verified",
-                        "evidence_text": "银行账号：110914414810101",
-                    }
-                ],
-                "debug": None,
-            }
-            client = TestClient(create_app(settings=settings, service=service))
-
-            response = client.post(
-                f"/contracts/{contract.contract_id}/chat",
-                data={"contract_id": contract.contract_id, "question": "账号？"},
-            )
-            image_response = client.get(
-                f"/contracts/{contract.contract_id}/images/images/account.jpg"
-            )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("图片证据", response.text)
-        self.assertIn("images/account.jpg", response.text)
-        self.assertIn("verification_status", response.text)
-        self.assertEqual(image_response.status_code, 200)
-        self.assertEqual(image_response.content, b"jpeg")
-
-    def test_page_renders_table_evidence_with_original_image_reference(self):
-        with TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            settings = Settings(
-                project_dir=root,
-                data_dir=root / "data",
-                database_path=root / "data" / "contracts.db",
-                contracts_dir=root / "data" / "contracts",
-                mineru_url="http://mineru.test",
-                mineru_backend="hybrid-engine",
-                mineru_server_url=None,
-            )
-            repository = ContractRepository(settings.database_path)
-            contract_dir = root / "contract"
-            contract = repository.create("contract.pdf", contract_dir)
-            repository.update_status(contract.contract_id, "ready")
-            service = Mock()
-            service.list_contracts.return_value = [repository.get(contract.contract_id)]
-            service.get_contract.return_value = repository.get(contract.contract_id)
-            service.ask.return_value = {
-                "answer": "付款比例为30%。",
-                "evidence": [
-                    {
-                        "node_type": "table",
-                        "source_object_index": 7,
-                        "page_idx": 2,
-                        "img_path": "images/payment-table.jpg",
-                        "image_type": "general",
-                        "structured_data": {
-                            "visible_text": "付款比例30%",
-                            "content_description": "付款计划表",
-                        },
-                        "verification_status": "not_required",
-                        "evidence_text": "第1行：付款比例 | 30%",
-                    }
-                ],
-                "debug": None,
-            }
-
-            response = TestClient(
-                create_app(settings=settings, service=service)
-            ).post(
-                f"/contracts/{contract.contract_id}/chat",
-                data={"contract_id": contract.contract_id, "question": "付款比例？"},
-            )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("表格原图", response.text)
-        self.assertIn("images/payment-table.jpg", response.text)
-        self.assertIn("付款计划表", response.text)

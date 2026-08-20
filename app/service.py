@@ -12,7 +12,6 @@ from app.evaluation_service import EvaluationService
 from app.evidence_serialization import serialize_node_result
 from app.index_manager import IndexManager
 from app.models import ContractRecord
-from app.qa import answer_question
 from app.rag_pipeline import RAGPipeline
 
 
@@ -96,26 +95,6 @@ class ContractService:
             if not raw_path.is_file():
                 raise ContractRawContentNotFoundError(str(raw_path))
         return self.repository.update_status(contract_id, "queued")
-
-    def ask(self, contract_id: str, question: str, debug: bool = False) -> dict[str, Any]:
-        contract = self.repository.get(contract_id)
-        if contract is None:
-            raise ContractNotFoundError(contract_id)
-        if contract.status != "ready":
-            raise ContractNotReadyError(contract)
-
-        index = self.index_manager.get(contract)
-        result = answer_question(
-            index,
-            question,
-            debug=debug,
-            pipeline=self.rag_pipeline,
-        )
-        return {
-            "contract_id": contract_id,
-            "question": question,
-            **result,
-        }
 
     def search_contract(
         self,

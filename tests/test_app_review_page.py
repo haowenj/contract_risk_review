@@ -199,6 +199,20 @@ def test_ready_review_page_shows_text_and_txt_md_inputs():
     assert "只选择一种输入方式" in response.text
 
 
+def test_review_page_includes_back_to_top_button():
+    with TemporaryDirectory() as temp_dir:
+        client, _, _, _ = build_client(Path(temp_dir))
+
+        response = client.get("/contracts/c1/review")
+
+    assert response.status_code == 200
+    assert 'id="back-to-top"' in response.text
+    assert 'aria-label="回到顶部"' in response.text
+    assert "position: fixed" in response.text
+    assert "window.scrollTo" in response.text
+    assert "prefers-reduced-motion" in response.text
+
+
 def test_text_submission_creates_run_executes_in_background_and_redirects():
     with TemporaryDirectory() as temp_dir:
         client, _, repository, _ = build_client(Path(temp_dir))

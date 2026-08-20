@@ -71,6 +71,20 @@ def test_ready_contract_has_evaluation_entry_and_page_shows_default_case():
     assert 'name="expected_source_object_indices"' in page_response.text
 
 
+def test_evaluation_page_includes_back_to_top_button():
+    with TemporaryDirectory() as temp_dir:
+        client, _ = build_client(Path(temp_dir))
+
+        response = client.get("/contracts/c1/evaluation")
+
+    assert response.status_code == 200
+    assert 'id="back-to-top"' in response.text
+    assert 'aria-label="回到顶部"' in response.text
+    assert "position: fixed" in response.text
+    assert "window.scrollTo" in response.text
+    assert "prefers-reduced-motion" in response.text
+
+
 def test_config_route_parses_numeric_ids_and_redirects():
     with TemporaryDirectory() as temp_dir:
         client, service = build_client(Path(temp_dir))

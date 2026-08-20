@@ -307,9 +307,8 @@
           <span class="status status-{{ contract.status }}">{{ contract.status|status_label }}</span>
           <div class="task-actions">
             {% if contract.status == "ready" %}
-              <a class="button primary" href="/contracts/{{ contract.contract_id }}">开始问答</a>
               <a class="button" href="/contracts/{{ contract.contract_id }}/review">风险评估</a>
-              <a class="button" href="/contracts/{{ contract.contract_id }}/evaluation">召回测试</a>
+              <a class="button primary" href="/contracts/{{ contract.contract_id }}/evaluation">召回测试</a>
               <button type="button" data-reprocess-contract-id="{{ contract.contract_id }}">重新解析</button>
             {% elif contract.status == "failed" %}
               <button type="button" data-reprocess-contract-id="{{ contract.contract_id }}">重新解析</button>
@@ -377,7 +376,7 @@
     const statusLabels = {
       queued: '排队中',
       processing: '处理中',
-      ready: '可问答',
+      ready: '已就绪',
       failed: '失败',
     };
 
@@ -425,18 +424,13 @@
       const actions = document.createElement('div');
       actions.className = 'task-actions';
       if (contract.status === 'ready') {
-        const link = document.createElement('a');
-        link.className = 'button primary';
-        link.href = `/contracts/${encodeURIComponent(contract.contract_id)}`;
-        link.textContent = '开始问答';
-        actions.append(link);
         const reviewLink = document.createElement('a');
         reviewLink.className = 'button';
         reviewLink.href = `/contracts/${encodeURIComponent(contract.contract_id)}/review`;
         reviewLink.textContent = '风险评估';
         actions.append(reviewLink);
         const evaluationLink = document.createElement('a');
-        evaluationLink.className = 'button';
+        evaluationLink.className = 'button primary';
         evaluationLink.href = `/contracts/${encodeURIComponent(contract.contract_id)}/evaluation`;
         evaluationLink.textContent = '召回测试';
         actions.append(evaluationLink);
@@ -468,7 +462,7 @@
         ['queued', 'processing'].includes(contract.status),
       ).length;
       const failed = contracts.filter((contract) => contract.status === 'failed').length;
-      queueSummary.textContent = `${ready} 个可问答 · ${processing} 个处理中 · ${failed} 个失败`;
+      queueSummary.textContent = `${ready} 个已就绪 · ${processing} 个处理中 · ${failed} 个失败`;
 
       if (contracts.length === 0) {
         const empty = document.createElement('li');
@@ -579,7 +573,7 @@
     });
 
     const pollInterval = Number(document.body.dataset.pollInterval || '10000');
-    queueSummary.textContent = `${document.querySelectorAll('.status-ready').length} 个可问答`;
+    queueSummary.textContent = `${document.querySelectorAll('.status-ready').length} 个已就绪`;
     window.setInterval(refreshContracts, pollInterval);
   </script>
 </body>

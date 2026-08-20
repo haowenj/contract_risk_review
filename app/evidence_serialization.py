@@ -40,7 +40,7 @@ def _add_metadata(
 
 
 def serialize_node_result(result: Any) -> dict[str, Any]:
-    """Serialize one Vector/Rerank/Selected result for chat and Evaluation."""
+    """Serialize one Vector/Rerank/Selected result for Evaluation."""
 
     node = result.node
     metadata = getattr(node, "metadata", {}) or {}

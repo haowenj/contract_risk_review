@@ -86,36 +86,26 @@ class AppAPITest(TestCase):
             mode="reuse_existing",
         )
 
-    def test_chat_returns_answer_from_service(self):
+    def test_chat_routes_are_removed(self):
         with TemporaryDirectory() as temp_dir:
             app, service = self._build(Path(temp_dir))
-            contract = service.repository.create("contract.pdf", Path(temp_dir) / "contract")
-            service.repository.update_status(contract.contract_id, "ready")
-            service.ask = Mock(
-                return_value={
-                    "contract_id": contract.contract_id,
-                    "question": "问题",
-                    "answer": "答案",
-                    "evidence": [],
-                    "debug": None,
-                }
+            contract = service.repository.create(
+                "contract.pdf",
+                Path(temp_dir) / "contract",
             )
+            service.repository.update_status(contract.contract_id, "ready")
+            client = TestClient(app)
 
-            response = TestClient(app).post(
+            html_response = client.get(f"/contracts/{contract.contract_id}")
+            form_response = client.post(
+                "/chat",
+                data={"contract_id": contract.contract_id, "question": "问题"},
+            )
+            api_response = client.post(
                 f"/api/contracts/{contract.contract_id}/chat",
                 json={"question": "问题"},
             )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["answer"], "答案")
-        service.ask.assert_called_once_with(contract.contract_id, "问题", False)
-
-    def test_chat_rejects_missing_contract(self):
-        with TemporaryDirectory() as temp_dir:
-            app, _ = self._build(Path(temp_dir))
-            response = TestClient(app).post(
-                "/api/contracts/missing/chat",
-                json={"question": "问题"},
-            )
-
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(html_response.status_code, 404)
+        self.assertEqual(form_response.status_code, 404)
+        self.assertEqual(api_response.status_code, 404)

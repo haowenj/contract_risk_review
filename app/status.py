@@ -4,7 +4,7 @@ from __future__ import annotations
 STATUS_LABELS = {
     "queued": "排队中",
     "processing": "处理中",
-    "ready": "可问答",
+    "ready": "已就绪",
     "failed": "失败",
 }
 

@@ -16,7 +16,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel
 
 from app.config import Settings, load_settings
 from app.db import ContractRepository
@@ -46,19 +46,6 @@ from app.service import (
 from app.status import status_label
 
 logger = logging.getLogger(__name__)
-
-
-class ChatRequest(BaseModel):
-    question: str = Field(min_length=1)
-    debug: bool = False
-
-    @field_validator("question")
-    @classmethod
-    def question_must_not_be_blank(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("question must not be blank")
-        return value
 
 
 class ReprocessRequest(BaseModel):
@@ -123,83 +110,6 @@ def create_app(
                 "error": error,
             },
         )
-
-    def render_chat_page(
-        request: Request,
-        contract_id: str,
-        *,
-        answer_result: dict[str, Any] | None = None,
-        question: str = "",
-        debug: bool = False,
-        error: str | None = None,
-    ) -> HTMLResponse:
-        selected_contract = active_service.get_contract(contract_id)
-        if selected_contract is None:
-            raise HTTPException(status_code=404, detail="contract not found")
-        return templates.TemplateResponse(
-            request=request,
-            name="chat.html",
-            context={
-                "selected_contract": selected_contract,
-                "answer_result": answer_result,
-                "question": question,
-                "debug": debug,
-                "error": error,
-            },
-        )
-
-    def render_chat_result(
-        request: Request,
-        contract_id: str,
-        question: str,
-        debug: bool,
-    ) -> HTMLResponse:
-        question = question.strip()
-        if not question:
-            return render_chat_page(
-                request,
-                contract_id,
-                question=question,
-                debug=debug,
-                error="请输入问题。",
-            )
-        try:
-            result = active_service.ask(contract_id, question, debug)
-            return render_chat_page(
-                request,
-                contract_id,
-                answer_result=result,
-                question=question,
-                debug=debug,
-            )
-        except ContractNotFoundError as exc:
-            raise HTTPException(status_code=404, detail="contract not found") from exc
-        except ContractNotReadyError as exc:
-            return render_chat_page(
-                request,
-                contract_id,
-                question=question,
-                debug=debug,
-                error=f"合同当前状态为 {status_label(exc.record.status)}，请等待入库完成。",
-            )
-        except FileNotFoundError as exc:
-            logger.exception("persisted index unavailable for %s", contract_id)
-            return render_chat_page(
-                request,
-                contract_id,
-                question=question,
-                debug=debug,
-                error="持久化索引不存在，请重新入库后再试。",
-            )
-        except Exception:
-            logger.exception("server-rendered question failed for %s", contract_id)
-            return render_chat_page(
-                request,
-                contract_id,
-                question=question,
-                debug=debug,
-                error="提问失败，请稍后重试。",
-            )
 
     def render_review_page(
         request: Request,
@@ -560,27 +470,6 @@ def create_app(
                 detail="review run not found",
             ) from exc
 
-    @application.post("/api/contracts/{contract_id}/chat")
-    def chat(contract_id: str, request: ChatRequest) -> dict[str, Any]:
-        try:
-            return active_service.ask(contract_id, request.question, request.debug)
-        except ContractNotFoundError as exc:
-            raise HTTPException(status_code=404, detail="contract not found") from exc
-        except ContractNotReadyError as exc:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "message": "contract is not ready",
-                    "status": exc.record.status,
-                },
-            ) from exc
-        except FileNotFoundError as exc:
-            logger.exception("persisted index unavailable for %s", contract_id)
-            raise HTTPException(status_code=500, detail="persisted index unavailable") from exc
-        except Exception as exc:
-            logger.exception("contract question failed for %s", contract_id)
-            raise HTTPException(status_code=500, detail="question failed") from exc
-
     @application.get("/", response_class=HTMLResponse)
     def home(request: Request) -> HTMLResponse:
         return render_dashboard(request)
@@ -600,19 +489,6 @@ def create_app(
             return render_dashboard(request, error=str(exc))
         background_tasks.add_task(active_service.processor.process, record.contract_id)
         return RedirectResponse(url="/", status_code=303)
-
-    @application.post("/chat", response_class=HTMLResponse)
-    def chat_page(
-        request: Request,
-        contract_id: str = Form(...),
-        question: str = Form(...),
-        debug: bool = Form(False),
-    ) -> HTMLResponse:
-        return render_chat_result(request, contract_id, question, debug)
-
-    @application.get("/contracts/{contract_id}", response_class=HTMLResponse)
-    def contract_page(request: Request, contract_id: str) -> HTMLResponse:
-        return render_chat_page(request, contract_id)
 
     @application.get(
         "/contracts/{contract_id}/review",
@@ -816,17 +692,5 @@ def create_app(
             url=f"/contracts/{contract_id}/evaluation?run_id={run.run_id}",
             status_code=303,
         )
-
-    @application.post(
-        "/contracts/{contract_id}/chat",
-        response_class=HTMLResponse,
-    )
-    def contract_chat_page(
-        request: Request,
-        contract_id: str,
-        question: str = Form(...),
-        debug: bool = Form(False),
-    ) -> HTMLResponse:
-        return render_chat_result(request, contract_id, question, debug)
 
     return application
