@@ -1,8 +1,10 @@
 import json
 from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 
+from app.contract_review import service as contract_review_service
 from app.contract_review.service import ContractReviewService
 from app.service import ContractNotFoundError, ContractNotReadyError
 
@@ -117,6 +119,18 @@ def build_service(contract_service, parse_payload=ITEMS, decision_payload=DECISI
 
 def ready_contract():
     return SimpleNamespace(contract_id="contract-1", status="ready")
+
+
+def test_default_llms_use_vllm_openai_reasoning_protocol():
+    with mock.patch.object(contract_review_service, "ChatOpenAI") as factory:
+        contract_review_service.build_contract_review_service(
+            contract_service=FakeContractService(ready_contract()),
+        )
+
+    assert factory.call_count == 3
+    for call in factory.call_args_list:
+        assert call.kwargs["reasoning_effort"] == "none"
+        assert "extra_body" not in call.kwargs
 
 
 def test_service_rejects_blank_inputs_before_contract_lookup():

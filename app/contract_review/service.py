@@ -32,13 +32,13 @@ def _build_structured_llm(
         },
     }
     return ChatOpenAI(
-        model=os.getenv("LLM_MODEL", "qwen3.7-plus"),
+        model=os.environ["LLM_MODEL"],
         api_key=os.environ["LLM_API_KEY"],
         base_url=os.environ["LLM_BASE_URL"],
         temperature=0,
         timeout=REVIEW_LLM_TIMEOUT_SECONDS,
         max_retries=0,
-        extra_body={"enable_thinking": False},
+        reasoning_effort="none",
     ).bind(response_format=response_format)
 
 

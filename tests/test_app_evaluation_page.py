@@ -11,7 +11,7 @@ os.environ.setdefault("LLM_API_KEY", "test-key")
 os.environ.setdefault("LLM_BASE_URL", "https://llm.test/v1")
 os.environ.setdefault("LLM_EMBEDDING_MODEL", "test-embedding-model")
 os.environ.setdefault("LLM_MODEL", "test-answer-model")
-os.environ.setdefault("LLM_RERANK_MODEL", "qwen3-rerank")
+os.environ.setdefault("LLM_RERANK_MODEL", "test-reranker")
 
 from app.config import Settings
 from main import create_app

@@ -26,7 +26,7 @@ DEBUG_SOURCE_OBJECT_INDICES = {111, 112, 113, 114}
 
 load_dotenv()
 
-# DashScope text-embedding-v4 accepts at most 10 input.contents per request.
+# Keep embedding requests small enough for local inference services.
 EMBEDDING_BATCH_SIZE = 10
 
 embedding_model = OpenAIEmbedding(

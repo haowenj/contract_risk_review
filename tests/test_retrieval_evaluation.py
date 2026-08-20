@@ -13,7 +13,11 @@ os.environ.setdefault("LLM_MODEL", "test-context-model")
 os.environ.setdefault("LLM_API_KEY", "test-key")
 os.environ.setdefault("LLM_BASE_URL", "https://llm.test/v1")
 os.environ.setdefault("LLM_EMBEDDING_MODEL", "test-embedding-model")
-os.environ.setdefault("LLM_RERANK_MODEL", "qwen3-rerank")
+os.environ.setdefault("LLM_RERANK_MODEL", "test-reranker")
+os.environ.setdefault(
+    "LLM_RERANK_URL",
+    "https://rerank.example/v1/rerank",
+)
 
 import retrieval_evaluation
 
@@ -299,7 +303,7 @@ class RetrievalEvaluationTest(TestCase):
             temperature=0,
             timeout=120.0,
             max_retries=0,
-            extra_body={"enable_thinking": False},
+            reasoning_effort="none",
         )
         factory.return_value.bind.assert_called_once_with(
             response_format=retrieval_evaluation.SELECTOR_RESPONSE_FORMAT,
@@ -385,10 +389,12 @@ class RetrievalEvaluationTest(TestCase):
                 {"index": 0, "relevance_score": 0.12},
             ]
         }
-        reranker = retrieval_evaluation.DashScopeReranker(
-            model="qwen3-rerank",
+        reranker = retrieval_evaluation.JinaReranker(
+            model="test-reranker",
             api_key="test-key",
-            base_url="https://workspace.cn-beijing.maas.aliyuncs.com/compatible-api/v1",
+            rerank_url=(
+                "https://dashscope.example/compatible-api/v1/reranks"
+            ),
         )
 
         with mock.patch.object(
@@ -399,13 +405,13 @@ class RetrievalEvaluationTest(TestCase):
             reranked = reranker.postprocess_nodes(results, query_str="问题")
 
         post.assert_called_once_with(
-            "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-api/v1/reranks",
+            "https://dashscope.example/compatible-api/v1/reranks",
             headers={
                 "Authorization": "Bearer test-key",
                 "Content-Type": "application/json",
             },
             json={
-                "model": "qwen3-rerank",
+                "model": "test-reranker",
                 "query": "问题",
                 "documents": ["embedding-content-10", "embedding-content-11"],
                 "top_n": 10,
@@ -422,17 +428,21 @@ class RetrievalEvaluationTest(TestCase):
         self.assertEqual(results[0].node.metadata["retrieval_score"], 0.8)
         self.assertEqual(results[1].node.metadata["retrieval_score"], 0.123)
 
-    def test_build_reranker_uses_existing_bailian_configuration(self):
-        with mock.patch.object(
-            retrieval_evaluation,
-            "DashScopeReranker",
-        ) as factory:
+    def test_build_reranker_uses_independent_rerank_url(self):
+        rerank_url = "http://gpustack.example/v1/rerank"
+        with (
+            mock.patch.dict(os.environ, {"LLM_RERANK_URL": rerank_url}),
+            mock.patch.object(
+                retrieval_evaluation,
+                "JinaReranker",
+            ) as factory,
+        ):
             retrieval_evaluation.build_reranker()
 
         factory.assert_called_once_with(
-            model="qwen3-rerank",
+            model=os.environ["LLM_RERANK_MODEL"],
             api_key=os.environ["LLM_API_KEY"],
-            base_url=os.environ["LLM_BASE_URL"],
+            rerank_url=rerank_url,
         )
 
     def test_evaluation_queries_keep_current_questions_and_gold_evidence(self):

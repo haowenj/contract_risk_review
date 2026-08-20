@@ -63,7 +63,7 @@ def build_default_image_ingestion_service(
     from app.image_understanding import ImageUnderstandingService
 
     vision_service = ImageUnderstandingService(
-        model_name=settings.image_vision_model,
+        model_name=settings.image_vision_model or os.environ["LLM_MODEL"],
         api_key=os.environ.get("LLM_API_KEY"),
         base_url=os.environ.get("LLM_BASE_URL"),
         timeout_seconds=settings.image_vision_timeout_seconds,

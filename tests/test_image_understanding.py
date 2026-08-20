@@ -101,7 +101,7 @@ def test_default_llm_binds_strict_image_response_format():
         temperature=0,
         timeout=120,
         max_retries=0,
-        extra_body={"enable_thinking": False},
+        reasoning_effort="none",
     )
     model.bind.assert_called_once_with(response_format=IMAGE_RESPONSE_FORMAT)
     assert service._llm is bound

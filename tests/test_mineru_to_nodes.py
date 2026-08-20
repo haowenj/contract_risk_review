@@ -18,7 +18,7 @@ class MineruToNodesTest(TestCase):
         self.assertNotIn("test_hetong", str(mineru_to_nodes.INPUT_PATH))
         self.assertNotIn("test_hetong", str(mineru_to_nodes.RETRIEVAL_CONTEXT_PATH))
 
-    def test_embedding_batch_size_matches_dashscope_limit(self):
+    def test_embedding_batch_size_uses_safe_default(self):
         self.assertEqual(mineru_to_nodes.embedding_model.embed_batch_size, 10)
 
     def test_build_nodes_consumes_persisted_context_and_preserves_original_text(self):

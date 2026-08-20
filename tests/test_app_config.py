@@ -7,6 +7,13 @@ from app.config import load_settings
 
 
 class SettingsTest(TestCase):
+    def test_missing_llm_model_does_not_fall_back_to_provider_default(self):
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            self.assertRaisesRegex(KeyError, "LLM_MODEL"),
+        ):
+            load_settings(Path("/project"))
+
     def test_defaults_are_relative_to_requested_project_directory(self):
         with TemporaryDirectory() as temp_dir:
             settings = load_settings(Path(temp_dir))

@@ -66,7 +66,10 @@ class RetrievalContextPreprocessTest(TestCase):
         self.assertEqual(contexts[1], "文档章节：付款条款")
 
     def test_context_llm_uses_fast_non_thinking_configuration(self):
-        self.assertEqual(retrieval_context_preprocess.context_llm.model_name, "qwen3.7-plus")
+        self.assertEqual(
+            retrieval_context_preprocess.context_llm.model_name,
+            os.getenv("RETRIEVAL_CONTEXT_LLM_MODEL") or os.environ["LLM_MODEL"],
+        )
         self.assertEqual(retrieval_context_preprocess.context_llm.temperature, 0)
         self.assertEqual(
             retrieval_context_preprocess.context_llm.request_timeout,
@@ -77,9 +80,10 @@ class RetrievalContextPreprocessTest(TestCase):
             120,
         )
         self.assertEqual(
-            retrieval_context_preprocess.context_llm.extra_body.get("enable_thinking"),
-            False,
+            retrieval_context_preprocess.context_llm.reasoning_effort,
+            "none",
         )
+        self.assertFalse(retrieval_context_preprocess.context_llm.extra_body)
 
     def test_prompt_requires_explicit_evidence_and_avoids_chunk_fact_rewrite(self):
         llm = RecordingLLM()

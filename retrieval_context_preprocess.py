@@ -22,7 +22,9 @@ from table_searchable_text import table_to_searchable_text
 MAX_RETRIEVAL_CONTEXT_CHARS = 160
 CONTEXT_LLM_CONCURRENCY = 5
 MAX_CONTEXT_GENERATION_ATTEMPTS = 3
-CONTEXT_LLM_MODEL = os.getenv("RETRIEVAL_CONTEXT_LLM_MODEL", "qwen3.7-plus")
+CONTEXT_LLM_MODEL = (
+    os.getenv("RETRIEVAL_CONTEXT_LLM_MODEL") or os.environ["LLM_MODEL"]
+)
 CONTEXT_LLM_TIMEOUT_SECONDS = int(
     os.getenv("RETRIEVAL_CONTEXT_LLM_TIMEOUT_SECONDS", "120")
 )
@@ -37,7 +39,7 @@ context_llm = ChatOpenAI(
     temperature=0,
     timeout=CONTEXT_LLM_TIMEOUT_SECONDS,
     max_retries=0,
-    extra_body={"enable_thinking": False},
+    reasoning_effort="none",
 )
 
 ContextGenerator = Callable[[str, list[str]], str | None]

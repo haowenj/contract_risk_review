@@ -21,7 +21,7 @@ class Settings:
     mineru_url: str
     mineru_backend: str
     mineru_server_url: str | None
-    image_vision_model: str = "qwen3.7-plus"
+    image_vision_model: str | None = None
     image_vision_timeout_seconds: float = 120.0
 
 
@@ -42,11 +42,8 @@ def load_settings(base_dir: Path | None = None) -> Settings:
         mineru_url=os.getenv("PDF_TRANS_MINERU_URL", DEFAULT_SVR_URL),
         mineru_backend=os.getenv("PDF_TRANS_MINERU_BACKEND", DEFAULT_BACKEND),
         mineru_server_url=os.getenv("PDF_TRANS_MINERU_SERVER_URL") or None,
-        image_vision_model=(
-            os.getenv("IMAGE_VISION_MODEL")
-            or os.getenv("LLM_MODEL")
-            or "qwen3.7-plus"
-        ),
+        image_vision_model=os.getenv("IMAGE_VISION_MODEL")
+        or os.environ["LLM_MODEL"],
         image_vision_timeout_seconds=float(
             os.getenv("IMAGE_VISION_TIMEOUT_SECONDS", "120")
         ),

@@ -25,8 +25,8 @@ SELECTOR_FALLBACK_TOP_K = 3
 SUMMARY_TIMEOUT_SECONDS = 120.0
 
 load_dotenv()
-RERANK_MODEL = os.getenv("LLM_RERANK_MODEL", "qwen3-rerank")
-SUMMARY_LLM_MODEL = os.getenv("LLM_MODEL", "qwen3.7-plus")
+RERANK_MODEL = os.environ["LLM_RERANK_MODEL"]
+SUMMARY_LLM_MODEL = os.environ["LLM_MODEL"]
 logger = logging.getLogger(__name__)
 
 SELECTOR_RESPONSE_FORMAT = {
@@ -126,7 +126,7 @@ def _build_structured_llm(response_format: dict[str, Any]) -> Any:
         temperature=0,
         timeout=SUMMARY_TIMEOUT_SECONDS,
         max_retries=0,
-        extra_body={"enable_thinking": False},
+        reasoning_effort="none",
     ).bind(response_format=response_format)
 
 
@@ -386,23 +386,11 @@ def generate_summaries(
     return evaluations
 
 
-def _build_rerank_endpoint(base_url: str) -> str:
-    base = base_url.rstrip("/")
-    if base.endswith("/reranks"):
-        return base
-    if base.endswith("/compatible-api/v1"):
-        return f"{base}/reranks"
-    if base.endswith("/compatible-mode/v1"):
-        base = base[: -len("/compatible-mode/v1")]
-        return f"{base}/compatible-api/v1/reranks"
-    return f"{base}/compatible-api/v1/reranks"
-
-
-class DashScopeReranker:
-    def __init__(self, *, model: str, api_key: str, base_url: str):
+class JinaReranker:
+    def __init__(self, *, model: str, api_key: str, rerank_url: str):
         self.model = model
         self.api_key = api_key
-        self.endpoint = _build_rerank_endpoint(base_url)
+        self.endpoint = rerank_url
 
     def postprocess_nodes(
         self,
@@ -463,11 +451,11 @@ class DashScopeReranker:
         return reranked_nodes
 
 
-def build_reranker() -> DashScopeReranker:
-    return DashScopeReranker(
+def build_reranker() -> JinaReranker:
+    return JinaReranker(
         model=RERANK_MODEL,
         api_key=os.environ["LLM_API_KEY"],
-        base_url=os.environ["LLM_BASE_URL"],
+        rerank_url=os.environ["LLM_RERANK_URL"],
     )
 
 

@@ -84,7 +84,7 @@ class ImageUnderstandingService:
                 temperature=0,
                 timeout=timeout_seconds,
                 max_retries=0,
-                extra_body={"enable_thinking": False},
+                reasoning_effort="none",
             ).bind(response_format=IMAGE_RESPONSE_FORMAT)
 
     def classify_and_extract(self, image_path: Path) -> ImageExtraction:
