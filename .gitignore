@@ -6,3 +6,4 @@ data/
 .idea/
 .DS_Store
 .worktrees/
+.docker-manage/
