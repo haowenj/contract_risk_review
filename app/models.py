@@ -13,6 +13,7 @@ class ContractRecord:
     error_message: str | None
     created_at: str
     updated_at: str
+    processing_stage: str | None = None
 
     def to_dict(self) -> dict[str, str | None]:
         return {
@@ -24,4 +25,5 @@ class ContractRecord:
             "error_message": self.error_message,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "processing_stage": self.processing_stage,
         }

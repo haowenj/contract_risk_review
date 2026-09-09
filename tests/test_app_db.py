@@ -69,6 +69,33 @@ class ContractRepositoryTest(TestCase):
         self.assertEqual(loaded.index_version, "index-v2")
         self.assertEqual(loaded.to_dict()["index_version"], "index-v2")
 
+    def test_processing_stage_is_visible_and_completed_stage_survives_ready(self):
+        with TemporaryDirectory() as temp_dir:
+            repository = ContractRepository(Path(temp_dir) / "contracts.db")
+            contract = repository.create(
+                "contract.pdf",
+                Path(temp_dir) / "contract",
+            )
+
+            processing = repository.update_status(
+                contract.contract_id,
+                "processing",
+                processing_stage="bm25_index",
+            )
+            ready = repository.update_status(
+                contract.contract_id,
+                "ready",
+                index_version="index-v2",
+                processing_stage="completed",
+            )
+
+        self.assertEqual(processing.processing_stage, "bm25_index")
+        self.assertEqual(ready.processing_stage, "completed")
+        self.assertEqual(
+            ready.to_dict()["processing_stage"],
+            "completed",
+        )
+
     def test_existing_contract_table_is_migrated_with_index_version(self):
         with TemporaryDirectory() as temp_dir:
             database_path = Path(temp_dir) / "contracts.db"

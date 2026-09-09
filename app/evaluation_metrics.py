@@ -6,6 +6,7 @@ import retrieval_evaluation
 
 from app.evidence_serialization import serialize_node_result
 from app.rag_pipeline import PIPELINE_VERSION
+from app.rag_pipeline import RETRIEVAL_MODES
 
 
 def _source_object_index(result: Any) -> Any:
@@ -33,7 +34,9 @@ def _vector_scores(results: list[Any]) -> dict[Any, Any]:
     return scores
 
 
-def build_config_snapshot() -> dict[str, Any]:
+def build_config_snapshot(retrieval_mode: str = "vector") -> dict[str, Any]:
+    if retrieval_mode not in RETRIEVAL_MODES:
+        raise ValueError(f"unsupported retrieval mode: {retrieval_mode}")
     return {
         "vector_top_k": retrieval_evaluation.TOP_K,
         "rerank_top_k": retrieval_evaluation.RERANK_TOP_N,
@@ -41,6 +44,41 @@ def build_config_snapshot() -> dict[str, Any]:
         "selector_model": retrieval_evaluation.SUMMARY_LLM_MODEL,
         "answer_model": retrieval_evaluation.SUMMARY_LLM_MODEL,
         "pipeline_version": PIPELINE_VERSION,
+        "retrieval_mode": retrieval_mode,
+    }
+
+
+def _raw_scores(results: list[Any]) -> dict[Any, Any]:
+    return {
+        _source_object_index(result): getattr(result, "score", None)
+        for result in results
+    }
+
+
+def build_raw_evaluation_result(
+    pipeline_result: dict[str, Any],
+    expected_source_object_indices: list[int],
+) -> dict[str, Any]:
+    results = list(pipeline_result.get("results", []))
+    expected = list(expected_source_object_indices)
+    return {
+        **pipeline_result,
+        "expected_source_object_indices": expected,
+        "retrieval_scores": _raw_scores(results),
+        "retrieval_ranks": _rank_by_source_object_index(results),
+        "retrieval_source_object_indices": [
+            _source_object_index(result) for result in results
+        ],
+        "retrieval_recall_at_5": retrieval_evaluation.recall_at_k(
+            results,
+            expected,
+            5,
+        ),
+        "retrieval_recall_at_10": retrieval_evaluation.recall_at_k(
+            results,
+            expected,
+            10,
+        ),
     }
 
 
@@ -48,6 +86,12 @@ def build_evaluation_result(
     pipeline_result: dict[str, Any],
     expected_source_object_indices: list[int],
 ) -> dict[str, Any]:
+    if "results" in pipeline_result:
+        return build_raw_evaluation_result(
+            pipeline_result,
+            expected_source_object_indices,
+        )
+
     vector_results = list(pipeline_result.get("vector_results", []))
     reranked_results = list(pipeline_result.get("reranked_results", []))
     expected = list(expected_source_object_indices)
@@ -92,8 +136,9 @@ def _serialize_result(result: Any) -> dict[str, Any]:
 
 def serialize_pipeline_result(result: dict[str, Any]) -> dict[str, Any]:
     serialized = dict(result)
-    for key in ("vector_results", "reranked_results", "selected_nodes"):
-        serialized[key] = [
-            _serialize_result(item) for item in result.get(key, [])
-        ]
+    for key in ("vector_results", "reranked_results", "selected_nodes", "results"):
+        if key in result:
+            serialized[key] = [
+                _serialize_result(item) for item in result.get(key, [])
+            ]
     return serialized

@@ -53,6 +53,7 @@ class ContractRepository:
                         status IN ('queued', 'processing', 'ready', 'failed')
                     ),
                     error_message TEXT,
+                    processing_stage TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
@@ -65,6 +66,10 @@ class ContractRepository:
             if "index_version" not in columns:
                 connection.execute(
                     "ALTER TABLE contracts ADD COLUMN index_version TEXT"
+                )
+            if "processing_stage" not in columns:
+                connection.execute(
+                    "ALTER TABLE contracts ADD COLUMN processing_stage TEXT"
                 )
             connection.execute(
                 """
@@ -92,6 +97,7 @@ class ContractRepository:
             error_message=row["error_message"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            processing_stage=row["processing_stage"],
         )
 
     def create(
@@ -136,6 +142,7 @@ class ContractRepository:
         error_message: str | None = None,
         *,
         index_version: str | None = None,
+        processing_stage: str | None = None,
     ) -> ContractRecord:
         if status not in CONTRACT_STATUSES:
             raise ValueError(f"unsupported contract status: {status}")
@@ -145,13 +152,15 @@ class ContractRepository:
             cursor = connection.execute(
                 """
                 UPDATE contracts
-                SET status = ?, index_version = ?, error_message = ?, updated_at = ?
+                SET status = ?, index_version = ?, error_message = ?,
+                    processing_stage = ?, updated_at = ?
                 WHERE contract_id = ?
                 """,
                 (
                     status,
                     index_version if status == "ready" else None,
                     error_message,
+                    processing_stage if status in {"processing", "ready"} else None,
                     timestamp,
                     contract_id,
                 ),

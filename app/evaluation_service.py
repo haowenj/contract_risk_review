@@ -15,7 +15,7 @@ from app.evaluation_metrics import (
 from app.evaluation_models import EvaluationCase, EvaluationRun
 from app.index_manager import IndexManager
 from app.models import ContractRecord
-from app.rag_pipeline import RAGPipeline
+from app.rag_pipeline import RAGPipeline, RETRIEVAL_MODES
 import retrieval_evaluation
 
 
@@ -173,32 +173,47 @@ class EvaluationService:
                 "评测集对应旧索引，请重新保存/重新标注"
             )
 
-    def create_single_run(self, contract_id: str, case_id: int) -> EvaluationRun:
+    def create_single_run(
+        self,
+        contract_id: str,
+        case_id: int,
+        *,
+        retrieval_mode: str = "vector",
+    ) -> EvaluationRun:
         contract = self._ready_contract(contract_id)
         case = self.evaluation_repository.get_case(contract_id, case_id)
         if case is None:
             raise EvaluationCaseNotFoundError(case_id)
         self._check_case_version(contract, case)
+        if retrieval_mode not in RETRIEVAL_MODES:
+            raise ValueError(f"unsupported retrieval mode: {retrieval_mode}")
         return self.evaluation_repository.create_run(
             contract_id,
             "single",
             contract.index_version,
-            build_config_snapshot(),
+            build_config_snapshot(retrieval_mode),
             [case],
         )
 
-    def create_all_run(self, contract_id: str) -> EvaluationRun:
+    def create_all_run(
+        self,
+        contract_id: str,
+        *,
+        retrieval_mode: str = "vector",
+    ) -> EvaluationRun:
         contract = self._ready_contract(contract_id)
         cases = self.evaluation_repository.list_cases(contract_id)
         if not cases:
             raise ValueError("evaluation set is empty")
         for case in cases:
             self._check_case_version(contract, case)
+        if retrieval_mode not in RETRIEVAL_MODES:
+            raise ValueError(f"unsupported retrieval mode: {retrieval_mode}")
         return self.evaluation_repository.create_run(
             contract_id,
             "all",
             contract.index_version,
-            build_config_snapshot(),
+            build_config_snapshot(retrieval_mode),
             cases,
         )
 
@@ -214,7 +229,15 @@ class EvaluationService:
                 raise EvaluationStaleError(
                     "评测运行对应旧索引，请重新保存评测集后再试"
                 )
+            retrieval_mode = run.config_snapshot.get("retrieval_mode", "vector")
+            if retrieval_mode not in RETRIEVAL_MODES:
+                raise ValueError(f"unsupported retrieval mode: {retrieval_mode}")
             index = self.index_manager.get(contract)
+            bm25_index = (
+                self.index_manager.get_bm25(contract)
+                if retrieval_mode in {"bm25", "hybrid"}
+                else None
+            )
             cases = self.evaluation_repository.list_run_items(run_id)
             for item in cases:
                 case = EvaluationCase(
@@ -229,7 +252,12 @@ class EvaluationService:
                     created_at=run.created_at,
                     updated_at=run.created_at,
                 )
-                pipeline_result = self.pipeline.run(index, case.question)
+                pipeline_result = self.pipeline.retrieve_raw(
+                    index,
+                    case.question,
+                    retrieval_mode=retrieval_mode,
+                    bm25_index=bm25_index,
+                )
                 evaluated = build_evaluation_result(
                     pipeline_result,
                     case.expected_source_object_indices,

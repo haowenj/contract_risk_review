@@ -218,6 +218,14 @@
         <div class="toolbar">
           <a class="button" href="/contracts/{{ selected_contract.contract_id }}/evaluation/metadata">查看解析对象</a>
           <a class="button" href="/contracts/{{ selected_contract.contract_id }}/evaluation/retrieval-context">查看检索上下文</a>
+          <label>
+            检索方式
+            <select id="retrieval-mode">
+              <option value="vector">向量检索</option>
+              <option value="bm25">BM25 检索</option>
+              <option value="hybrid">混合检索</option>
+            </select>
+          </label>
         </div>
         <form id="cases-form" action="/contracts/{{ selected_contract.contract_id }}/evaluation/config" method="post">
           <div id="case-list">
@@ -265,7 +273,16 @@
           <article class="result-card">
             <h3>{{ loop.index }}. {{ item.question }}</h3>
             <div class="ids"><strong>正确 Node ID：</strong>{{ item.expected_source_object_indices|join(', ') if item.expected_source_object_indices else '未配置' }}</div>
-            {% if result and result.llm_summary is defined %}
+            {% if result and result.results is defined %}
+              {% set retrieval_labels = {"vector": "向量检索", "bm25": "BM25 检索", "hybrid": "混合检索"} %}
+              <div class="ids"><strong>检索方式：</strong>{{ retrieval_labels.get(result.retrieval_mode, result.retrieval_mode) }}</div>
+              <details open>
+                <summary>{{ retrieval_labels.get(result.retrieval_mode, result.retrieval_mode) }} Top K 原始召回</summary>
+                {% for node in result.results %}
+                  <div class="node"><small>排名 {{ loop.index }} · Node ID {{ node.node_id }} · source_object_index={{ node.source_object_index }} · 原始分数={{ node.score if node.score is defined else '—' }}{% if node.page_idx is defined %} · page={{ node.page_idx }}{% endif %}</small>{{ image_evidence(node) }}{{ node.evidence_text if node.evidence_text is defined else node.text }}</div>
+                {% else %}<p class="hint">没有原始召回结果。</p>{% endfor %}
+              </details>
+            {% elif result and result.llm_summary is defined %}
               <div class="ids"><strong>Vector Top10 实际 Node ID：</strong>{{ result.vector_source_object_indices|join(', ') }}</div>
               <div class="ids"><strong>Rerank Top10 实际 Node ID：</strong>{{ result.rerank_source_object_indices|join(', ') }}</div>
               <div class="metrics">
@@ -329,6 +346,7 @@
     const caseList = document.querySelector('#case-list');
     const caseTemplate = document.querySelector('#case-template');
     const addCaseButton = document.querySelector('#add-case');
+    const retrievalMode = document.querySelector('#retrieval-mode');
     const runId = document.body.dataset.runId;
 
     function addCaseRow() {
@@ -346,6 +364,17 @@
     }
 
     addCaseButton?.addEventListener('click', addCaseRow);
+    document.querySelectorAll('form[action*="/evaluation/"]').forEach((form) => {
+      form.addEventListener('submit', () => {
+        form.querySelector('input[name="retrieval_mode"]')?.remove();
+        if (!retrievalMode) return;
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'retrieval_mode';
+        input.value = retrievalMode.value;
+        form.append(input);
+      });
+    });
     caseList?.addEventListener('click', (event) => {
       const button = event.target.closest('.remove-case');
       if (button) removeCaseRow(button);

@@ -10,6 +10,7 @@ from typing import Any, Literal
 from llama_index.core import VectorStoreIndex
 
 from app.config import Settings
+from app.bm25_index import BM25Index
 from app.db import ContractRepository
 from app.index_manager import IndexManager
 from app.image_ingestion import ContractImageIngestionService, write_json_atomic
@@ -107,8 +108,13 @@ class ContractProcessor:
         if mode not in {"reuse_existing", "from_scratch"}:
             raise ValueError(f"unsupported process mode: {mode}")
 
-        self.repository.update_status(contract_id, "processing")
+        self.repository.update_status(
+            contract_id,
+            "processing",
+            processing_stage="document_parsing",
+        )
         self.index_manager.clear(contract_id)
+        stage = "文档解析"
         try:
             paths = self._paths(contract)
             if mode == "from_scratch":
@@ -159,24 +165,48 @@ class ContractProcessor:
             contexts = generate_contexts(objects)
             save_retrieval_contexts(contexts, paths["context"])
             nodes = build_nodes(objects, retrieval_contexts=contexts)
+            stage = "向量索引构建"
+            self.repository.update_status(
+                contract_id,
+                "processing",
+                processing_stage="vector_index",
+            )
             model = self.embedding_model or get_embedding_model()
             index = VectorStoreIndex(nodes, embed_model=model)
             paths["index"].mkdir(parents=True, exist_ok=True)
             index.storage_context.persist(persist_dir=str(paths["index"]))
+            stage = "BM25 索引构建"
+            self.repository.update_status(
+                contract_id,
+                "processing",
+                processing_stage="bm25_index",
+            )
+            bm25_index = BM25Index(nodes)
+            bm25_index.persist(paths["bm25_index"])
             index_version = str(uuid.uuid4())
             self.index_manager.put(
                 contract_id,
                 index,
                 index_version=index_version,
             )
+            self.index_manager.put_bm25(
+                contract_id,
+                bm25_index,
+                index_version=index_version,
+            )
             return self.repository.update_status(
                 contract_id,
                 "ready",
                 index_version=index_version,
+                processing_stage="completed",
             )
         except Exception as exc:
             logger.exception("contract ingestion failed: %s", contract_id)
-            return self.repository.update_status(contract_id, "failed", str(exc))
+            return self.repository.update_status(
+                contract_id,
+                "failed",
+                f"{stage}失败: {exc}",
+            )
 
     @staticmethod
     def _paths(contract: ContractRecord) -> dict[str, Path]:
@@ -189,4 +219,5 @@ class ContractProcessor:
             "merge_log": storage_dir / "merge_log.json",
             "context": storage_dir / "retrieval_context.json",
             "index": storage_dir / "index",
+            "bm25_index": storage_dir / "bm25_index",
         }

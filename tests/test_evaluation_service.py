@@ -151,7 +151,18 @@ def test_execute_all_run_reuses_one_persisted_index_and_saves_full_results():
             "index-v2",
             [("问题一", [1]), ("问题二", [2])],
         )
-        pipeline.run.side_effect = [pipeline_result("问题一", 1), pipeline_result("问题二", 2)]
+        pipeline.retrieve_raw.side_effect = [
+            {
+                "query": "问题一",
+                "retrieval_mode": "vector",
+                "results": [result_for(1, "问题一-证据")],
+            },
+            {
+                "query": "问题二",
+                "retrieval_mode": "vector",
+                "results": [result_for(2, "问题二-证据")],
+            },
+        ]
 
         run = service.create_all_run("c1")
         result = service.execute_run(run.run_id)
@@ -160,10 +171,10 @@ def test_execute_all_run_reuses_one_persisted_index_and_saves_full_results():
     assert result.status == "ready"
     assert run.config_snapshot["vector_top_k"] == 10
     index_manager.get.assert_called_once()
-    assert pipeline.run.call_count == 2
+    assert pipeline.retrieve_raw.call_count == 2
     assert len(items) == 2
-    assert items[0].result["vector_results"][0]["source_object_index"] == 1
-    assert "vector_recall_at_10" in items[0].result
+    assert items[0].result["results"][0]["source_object_index"] == 1
+    assert items[0].result["retrieval_recall_at_10"] == 1.0
 
 
 def test_execute_run_marks_failed_when_index_load_fails():
@@ -177,3 +188,39 @@ def test_execute_run_marks_failed_when_index_load_fails():
 
     assert result.status == "failed"
     assert result.error_message == "missing index"
+
+
+def test_execute_bm25_run_loads_bm25_index_and_saves_raw_results_only():
+    with TemporaryDirectory() as temp_dir:
+        service, _, repository, index_manager, pipeline = build_service(Path(temp_dir))
+        case = repository.replace_cases("c1", "index-v2", [("付款方式？", [7])])[0]
+        vector_index = object()
+        bm25_index = object()
+        index_manager.get.return_value = vector_index
+        index_manager.get_bm25.return_value = bm25_index
+        raw_result = result_for(7, "付款方式为银行转账。", score=3.2)
+        pipeline.retrieve_raw.return_value = {
+            "query": "付款方式？",
+            "retrieval_mode": "bm25",
+            "results": [raw_result],
+        }
+
+        run = service.create_single_run("c1", case.case_id, retrieval_mode="bm25")
+        result = service.execute_run(run.run_id)
+        item = repository.list_run_items(run.run_id)[0]
+
+    assert result.status == "ready"
+    assert run.config_snapshot["retrieval_mode"] == "bm25"
+    index_manager.get.assert_called_once()
+    index_manager.get_bm25.assert_called_once()
+    pipeline.retrieve_raw.assert_called_once_with(
+        vector_index,
+        "付款方式？",
+        retrieval_mode="bm25",
+        bm25_index=bm25_index,
+    )
+    assert item.result["retrieval_mode"] == "bm25"
+    assert item.result["results"][0]["node_id"] == "node-7"
+    assert item.result["results"][0]["score"] == 3.2
+    assert "reranked_results" not in item.result
+    assert "llm_summary" not in item.result

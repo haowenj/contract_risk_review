@@ -174,11 +174,29 @@ class ContractService:
     def save_evaluation_cases(self, contract_id: str, entries):
         return self.evaluation_service.save_cases(contract_id, entries)
 
-    def create_single_evaluation_run(self, contract_id: str, case_id: int):
-        return self.evaluation_service.create_single_run(contract_id, case_id)
+    def create_single_evaluation_run(
+        self,
+        contract_id: str,
+        case_id: int,
+        *,
+        retrieval_mode: str = "vector",
+    ):
+        return self.evaluation_service.create_single_run(
+            contract_id,
+            case_id,
+            retrieval_mode=retrieval_mode,
+        )
 
-    def create_all_evaluation_run(self, contract_id: str):
-        return self.evaluation_service.create_all_run(contract_id)
+    def create_all_evaluation_run(
+        self,
+        contract_id: str,
+        *,
+        retrieval_mode: str = "vector",
+    ):
+        return self.evaluation_service.create_all_run(
+            contract_id,
+            retrieval_mode=retrieval_mode,
+        )
 
     def execute_evaluation_run(self, run_id: str):
         return self.evaluation_service.execute_run(run_id)
