@@ -43,7 +43,7 @@ from app.service import (
     ContractReprocessNotAllowedError,
     ContractService,
 )
-from app.status import status_label
+from app.status import processing_stage_label, status_label
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +95,7 @@ def create_app(
     templates.env.policies["json.dumps_kwargs"]["ensure_ascii"] = False
     templates.env.filters["markdown"] = render_markdown
     templates.env.filters["status_label"] = status_label
+    templates.env.filters["processing_stage_label"] = processing_stage_label
 
     def render_dashboard(
         request: Request,
@@ -653,9 +654,14 @@ def create_app(
         contract_id: str,
         case_id: int,
         background_tasks: BackgroundTasks,
+        retrieval_mode: str = Form(default="vector"),
     ) -> Response:
         try:
-            run = active_service.create_single_evaluation_run(contract_id, case_id)
+            run = active_service.create_single_evaluation_run(
+                contract_id,
+                case_id,
+                retrieval_mode=retrieval_mode,
+            )
         except (
             EvaluationContractNotFoundError,
             EvaluationCaseNotFoundError,
@@ -665,6 +671,8 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except EvaluationStaleError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         background_tasks.add_task(active_service.execute_evaluation_run, run.run_id)
         return RedirectResponse(
             url=f"/contracts/{contract_id}/evaluation?run_id={run.run_id}",
@@ -678,9 +686,13 @@ def create_app(
     def run_all_evaluation(
         contract_id: str,
         background_tasks: BackgroundTasks,
+        retrieval_mode: str = Form(default="vector"),
     ) -> Response:
         try:
-            run = active_service.create_all_evaluation_run(contract_id)
+            run = active_service.create_all_evaluation_run(
+                contract_id,
+                retrieval_mode=retrieval_mode,
+            )
         except EvaluationContractNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except EvaluationContractNotReadyError as exc:

@@ -55,45 +55,11 @@ EVIDENCE = {
     "table_body": "<table><tr><td>180日</td></tr></table>",
 }
 
-SECOND_EVIDENCE = {
-    "source_object_index": 99,
-    "page_idx": 12,
-    "node_type": "text",
-    "text": "乙方不得将合同义务转委托给第三方。",
-    "evidence_text": "乙方不得将合同义务转委托给第三方。",
-}
-
-QUERY_REWRITE = {
-    "retrieval_query": "乙方权利义务、转委托、第三方履约及委托其他单位实施的约定",
-    "reason": "扩展分包和转包的近义表达与相关章节名称",
-    "primary_keywords": ["分包", "转包", "转委托", "委托第三方履行"],
-    "secondary_keywords": ["第三方", "书面同意"],
-}
-
 RERANK_TOP3_DEBUG = [
     {"source_object_index": 51, "text": "（二）乙方权利与义务"},
     {"source_object_index": 47, "text": "（一）甲方权利与义务"},
     {"source_object_index": 46, "text": "第五条 双方权利与义务"},
 ]
-
-INSUFFICIENT_DECISION = {
-    "risk_status": "needs_review",
-    "risk_level": None,
-    "evidence_status": "insufficient",
-    "finding": "现有证据只有章节标题。",
-    "risk_description": "证据不足以判断是否允许分包。",
-    "suggestion": "继续检索乙方权利义务及第三方履约约定。",
-}
-
-ABSENCE_DECISION = {
-    "risk_status": "risk",
-    "risk_level": "medium",
-    "evidence_status": "absence_verified",
-    "finding": "基于当前合同全文解析结果，未发现明确限制乙方分包或转包的条款。",
-    "risk_description": "两次语义检索及全文关键词核验均未发现对应约定。",
-    "suggestion": "建议补充未经书面同意不得分包或转包的明确条款。",
-}
-
 
 class FakeLLM:
     def __init__(self, *payloads):
@@ -161,7 +127,6 @@ def build_nodes(**updates):
     values = {
         "parse_llm": FakeLLM(),
         "review_llm": FakeLLM(),
-        "query_rewrite_llm": FakeLLM(),
         "contract_service": FakeContractService(),
     }
     values.update(updates)
@@ -214,16 +179,12 @@ def test_prepare_review_item_resets_per_item_state():
     }
 
 
-def test_route_after_retrieve_never_creates_a_third_rag_attempt():
+def test_route_after_retrieve_sends_empty_hybrid_retrieval_to_insufficient_result():
     assert route_after_retrieve(
         initial_state(retrieval_attempt=1, retrieved_evidence=[])
-    ) == "rewrite_query"
-    assert route_after_retrieve(
-        initial_state(retrieval_attempt=2, retrieved_evidence=[])
-    ) == "absence_check"
+    ) == "insufficient_result"
     assert route_after_retrieve(
         initial_state(
-            retrieval_attempt=2,
             retrieved_evidence=[Evidence.model_validate(EVIDENCE)],
         )
     ) == "risk_decision"
@@ -250,11 +211,9 @@ def test_parse_review_rules_node_validates_items_and_emits_serializable_progress
 def test_explicit_graph_uses_current_query_and_preserves_rag_citations():
     events = []
     contract_service = FakeContractService([EVIDENCE])
-    query_rewrite_llm = FakeLLM()
     nodes = ContractReviewNodes(
         parse_llm=FakeLLM(ONE_ITEM_PAYLOAD),
         review_llm=FakeLLM(RISK_DECISION),
-        query_rewrite_llm=query_rewrite_llm,
         contract_service=contract_service,
         progress_callback=lambda event, payload: events.append((event, payload)),
     )
@@ -270,7 +229,6 @@ def test_explicit_graph_uses_current_query_and_preserves_rag_citations():
     assert result.evidence[0].source_object_index == 27
     assert result.evidence[0].page_idx == 4
     assert result.evidence[0].node_type == "table"
-    assert query_rewrite_llm.prompts == []
     assert [event for event, _ in events] == [
         "review_items_parsed",
         "review_item_started",
@@ -282,260 +240,31 @@ def test_explicit_graph_uses_current_query_and_preserves_rag_citations():
         json.dumps(payload, ensure_ascii=False)
 
 
-def test_explicit_graph_rewrites_query_after_empty_evidence_without_first_review_call():
+def test_explicit_graph_sends_empty_hybrid_retrieval_to_insufficient_result():
     events = []
-    review_llm = FakeLLM(RISK_DECISION)
-    query_rewrite_llm = FakeLLM(QUERY_REWRITE)
-    contract_service = FakeContractService([], [SECOND_EVIDENCE])
+    review_llm = FakeLLM()
+    contract_service = FakeContractService([])
     nodes = ContractReviewNodes(
         parse_llm=FakeLLM(ONE_ITEM_PAYLOAD),
         review_llm=review_llm,
-        query_rewrite_llm=query_rewrite_llm,
         contract_service=contract_service,
         progress_callback=lambda event, payload: events.append((event, payload)),
     )
     final_state = build_contract_review_graph(nodes).invoke(initial_state())
 
     result = final_state["review_results"][0]
-    assert contract_service.searches == [
-        ("contract-1", "合同约定的付款期限是多久"),
-        ("contract-1", QUERY_REWRITE["retrieval_query"]),
-    ]
-    assert len(query_rewrite_llm.prompts) == 1
-    assert len(review_llm.prompts) == 1
-    assert result.risk_status == "risk"
-    assert [value.source_object_index for value in result.evidence] == [99]
-    assert [event for event, _ in events] == [
-        "review_items_parsed",
-        "review_item_started",
-        "evidence_retrieved",
-        "empty_evidence_rerank_debug",
-        "retrieval_query_rewritten",
-        "evidence_retrieved",
-        "review_item_completed",
-        "review_summary",
-    ]
-    assert [
-        payload["attempt"]
-        for event, payload in events
-        if event == "evidence_retrieved"
-    ] == [1, 2]
-    assert events[3][1] == {
-        "item_id": "item_1",
-        "attempt": 1,
-        "retrieval_query": "合同约定的付款期限是多久",
-        "rerank_top3": RERANK_TOP3_DEBUG,
-    }
-    assert events[4][1]["retrieval_query"] == QUERY_REWRITE["retrieval_query"]
-
-
-def test_explicit_graph_retries_insufficient_decision_and_merges_unique_evidence():
-    review_llm = FakeLLM(INSUFFICIENT_DECISION, RISK_DECISION)
-    query_rewrite_llm = FakeLLM(QUERY_REWRITE)
-    contract_service = FakeContractService(
-        [EVIDENCE],
-        [EVIDENCE, SECOND_EVIDENCE],
-    )
-    nodes = ContractReviewNodes(
-        parse_llm=FakeLLM(ONE_ITEM_PAYLOAD),
-        review_llm=review_llm,
-        query_rewrite_llm=query_rewrite_llm,
-        contract_service=contract_service,
-    )
-    final_state = build_contract_review_graph(nodes).invoke(initial_state())
-
-    result = final_state["review_results"][0]
-    assert len(review_llm.prompts) == 2
-    assert len(query_rewrite_llm.prompts) == 1
-    assert len(contract_service.searches) == 2
-    assert [value.source_object_index for value in result.evidence] == [27, 99]
-
-
-def test_explicit_graph_stops_after_second_empty_retrieval_and_runs_absence_decision():
-    review_llm = FakeLLM(ABSENCE_DECISION)
-    query_rewrite_llm = FakeLLM(QUERY_REWRITE)
-    contract_service = FakeContractService([], [])
-    nodes = ContractReviewNodes(
-        parse_llm=FakeLLM(ONE_ITEM_PAYLOAD),
-        review_llm=review_llm,
-        query_rewrite_llm=query_rewrite_llm,
-        contract_service=contract_service,
-    )
-    final_state = build_contract_review_graph(nodes).invoke(initial_state())
-
-    result = final_state["review_results"][0]
-    assert len(contract_service.searches) == 2
-    assert len(query_rewrite_llm.prompts) == 1
-    assert len(review_llm.prompts) == 1
-    assert result.risk_status == "risk"
-    assert result.risk_level == "medium"
-    assert result.evidence_status == "absence_verified"
+    assert len(contract_service.searches) == 1
+    assert contract_service.content_loads == []
+    assert review_llm.prompts == []
+    assert result.risk_status == "needs_review"
+    assert result.risk_level is None
+    assert result.evidence_status == "insufficient"
     assert result.evidence == []
-    assert "合同没有约定" not in result.finding
-
-
-def test_graph_scans_after_two_empty_rag_results_and_reviews_absence_candidate():
-    events = []
-    contract_service = FakeContractService(
-        [],
-        [],
-        source_objects=[
-            {"type": "text", "text": "标题", "page_idx": 0},
-            {
-                "type": "text",
-                "text": "未经甲方书面同意，乙方不得委托第三方履行合同义务。",
-                "page_idx": 4,
-            },
-        ],
-    )
-    review_llm = FakeLLM(RISK_DECISION)
-    nodes = ContractReviewNodes(
-        parse_llm=FakeLLM(ONE_ITEM_PAYLOAD),
-        query_rewrite_llm=FakeLLM(
-            {
-                **QUERY_REWRITE,
-                "primary_keywords": ["分包", "转包", "委托第三方履行"],
-                "secondary_keywords": ["第三方", "书面同意"],
-            }
-        ),
-        review_llm=review_llm,
-        contract_service=contract_service,
-        progress_callback=lambda event, payload: events.append((event, payload)),
-    )
-
-    final_state = build_contract_review_graph(nodes).invoke(initial_state())
-
-    result = final_state["review_results"][0]
-    assert len(contract_service.searches) == 2
-    assert contract_service.content_loads == ["contract-1"]
-    assert [item.source_object_index for item in result.evidence] == [1]
-    assert result.evidence[0].matched_primary_keywords == ["委托第三方履行"]
-    assert result.evidence[0].matched_secondary_keywords == ["第三方", "书面同意"]
-    assert result.evidence[0].matched_keywords == [
-        "委托第三方履行",
-        "第三方",
-        "书面同意",
-    ]
-    assert result.absence_check is not None
-    assert result.absence_check.model_dump() == {
-        "primary_keywords": ["分包", "转包", "委托第三方履行"],
-        "secondary_keywords": ["第三方", "书面同意"],
-        "candidate_count": 1,
-    }
-    assert "未经甲方书面同意" in review_llm.prompts[0]
-    assert RERANK_TOP3_DEBUG[0]["text"] not in review_llm.prompts[0]
-    assert [event for event, _ in events].count("absence_check_started") == 1
-    assert [event for event, _ in events].count("absence_keywords_generated") == 1
-    assert [event for event, _ in events].count("absence_candidates_found") == 1
-
-
-def test_graph_returns_audited_absence_verified_after_two_empty_rag_results():
-    events = []
-    contract_service = FakeContractService(
-        [],
-        [],
-        source_objects=[
-            {"type": "text", "text": "付款与验收条款", "page_idx": 1},
-        ],
-    )
-    nodes = ContractReviewNodes(
-        parse_llm=FakeLLM(ONE_ITEM_PAYLOAD),
-        query_rewrite_llm=FakeLLM(QUERY_REWRITE),
-        review_llm=FakeLLM(ABSENCE_DECISION),
-        contract_service=contract_service,
-        progress_callback=lambda event, payload: events.append((event, payload)),
-    )
-
-    final_state = build_contract_review_graph(nodes).invoke(initial_state())
-
-    result = final_state["review_results"][0]
-    assert len(contract_service.searches) == 2
-    assert result.risk_status == "risk"
-    assert result.risk_level == "medium"
-    assert result.evidence_status == "absence_verified"
-    assert result.evidence == []
-    assert result.absence_check is not None
-    assert result.absence_check.model_dump() == {
-        "primary_keywords": ["分包", "转包", "转委托", "委托第三方履行"],
-        "secondary_keywords": ["第三方", "书面同意"],
-        "candidate_count": 0,
-    }
-    assert "合同肯定没有" not in result.finding
-    assert [event for event, _ in events].count("absence_confirmed") == 1
-
-
-@pytest.mark.parametrize(
-    "invalid_decision",
-    [
-        INSUFFICIENT_DECISION,
-        {
-            **ABSENCE_DECISION,
-            "finding": "合同肯定没有分包限制条款。",
-        },
-        {
-            **ABSENCE_DECISION,
-            "finding": "未发现明确限制乙方分包或转包的条款。",
-        },
-        {
-            **ABSENCE_DECISION,
-            "finding": "综合判断：基于当前合同全文解析结果，未发现分包限制条款。",
-        },
-        {
-            **ABSENCE_DECISION,
-            "finding": "基于当前合同全文解析结果，合同绝对不存在分包限制。",
-        },
-        {
-            **ABSENCE_DECISION,
-            "risk_description": "已确认没有任何分包限制条款。",
-        },
-        {
-            **ABSENCE_DECISION,
-            "suggestion": "由于合同完全不存在相关条款，建议补充。",
-        },
-        {
-            **ABSENCE_DECISION,
-            "risk_description": "据此可以断定合同没有分包限制条款。",
-        },
-        {
-            **ABSENCE_DECISION,
-            "suggestion": "合同根本不存在相关约定，应当补充。",
-        },
-        {
-            **ABSENCE_DECISION,
-            "finding": "基于当前合同全文解析结果，未发现相关条款，因此合同绝 对不存在分包限制。",
-        },
-    ],
-)
-def test_absence_result_rejects_invalid_or_absolute_decisions(invalid_decision):
-    nodes = ContractReviewNodes(
-        parse_llm=FakeLLM(ONE_ITEM_PAYLOAD),
-        query_rewrite_llm=FakeLLM(QUERY_REWRITE),
-        review_llm=FakeLLM(invalid_decision),
-        contract_service=FakeContractService([], [], source_objects=[]),
-    )
-
-    with pytest.raises(RuntimeError, match="absence_result item_1 failed") as error:
-        build_contract_review_graph(nodes).invoke(initial_state())
-
-    assert isinstance(error.value.__cause__, ValueError)
-
-
-def test_absence_check_preserves_missing_content_file_failure():
-    nodes = ContractReviewNodes(
-        parse_llm=FakeLLM(ONE_ITEM_PAYLOAD),
-        query_rewrite_llm=FakeLLM(QUERY_REWRITE),
-        review_llm=FakeLLM(ABSENCE_DECISION),
-        contract_service=FakeContractService(
-            [],
-            [],
-            source_objects=FileNotFoundError("merged_content_list.json"),
-        ),
-    )
-
-    with pytest.raises(RuntimeError, match="absence_check item_1 failed") as error:
-        build_contract_review_graph(nodes).invoke(initial_state())
-
-    assert isinstance(error.value.__cause__, FileNotFoundError)
+    event_names = [event for event, _ in events]
+    assert "retrieval_query_rewritten" not in event_names
+    assert "absence_check_started" not in event_names
+    assert "absence_candidates_found" not in event_names
+    assert "absence_confirmed" not in event_names
 
 
 def test_aggregate_results_counts_all_statuses_without_llm():

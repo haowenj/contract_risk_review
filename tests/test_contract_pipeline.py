@@ -95,7 +95,7 @@ class ContractProcessorTest(TestCase):
                 result = processor.process(contract.contract_id)
 
         self.assertEqual(result.status, "failed")
-        self.assertEqual(result.error_message, "parse failed")
+        self.assertEqual(result.error_message, "文档解析失败: parse failed")
 
     def test_reuse_existing_mode_skips_parse_and_runs_downstream_pipeline(self):
         with TemporaryDirectory() as temp_dir:
@@ -155,6 +155,7 @@ class ContractProcessorTest(TestCase):
             contract_dir = settings.contracts_dir / "c1"
             contract_dir.mkdir(parents=True)
             (contract_dir / "raw_content_list.json").write_text("[]", encoding="utf-8")
+            (contract_dir / "merged_content_list.json").write_text("[]", encoding="utf-8")
             repository = ContractRepository(settings.database_path)
             contract = repository.create("contract.pdf", contract_dir)
             manager = IndexManager(object())
@@ -242,6 +243,7 @@ class ContractProcessorTest(TestCase):
             contract_dir = settings.contracts_dir / "c1"
             contract_dir.mkdir(parents=True)
             (contract_dir / "raw_content_list.json").write_text("[]", encoding="utf-8")
+            (contract_dir / "merged_content_list.json").write_text("[]", encoding="utf-8")
             repository = ContractRepository(settings.database_path)
             contract = repository.create("contract.pdf", contract_dir)
             manager = IndexManager(object())
@@ -335,3 +337,108 @@ class ContractProcessorTest(TestCase):
                 ),
                 enriched_objects,
             )
+
+    def test_process_persists_bm25_after_vector_index_from_same_nodes(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = self._settings(root)
+            contract_dir = settings.contracts_dir / "c1"
+            contract_dir.mkdir(parents=True)
+            (contract_dir / "raw_content_list.json").write_text("[]", encoding="utf-8")
+            (contract_dir / "merged_content_list.json").write_text("[]", encoding="utf-8")
+            repository = ContractRepository(settings.database_path)
+            contract = repository.create("contract.pdf", contract_dir)
+            manager = IndexManager(object())
+            nodes = [SimpleNamespace(node_id="node-1")]
+            call_order = []
+            vector_index = SimpleNamespace(
+                storage_context=SimpleNamespace(
+                    persist=Mock(side_effect=lambda **kwargs: call_order.append("vector_persist"))
+                )
+            )
+            bm25_index = SimpleNamespace(
+                persist=Mock(side_effect=lambda *args, **kwargs: call_order.append("bm25_persist"))
+            )
+
+            def build_vector_index(*args, **kwargs):
+                call_order.append("vector_build")
+                return vector_index
+
+            def build_bm25_index(index_nodes):
+                call_order.append("bm25_build")
+                assert index_nodes is nodes
+                return bm25_index
+
+            with patch("app.pipeline.clean_content_list_file"), patch(
+                "app.pipeline.merge_content_list_file"
+            ), patch(
+                "app.pipeline.generate_contexts", return_value={}
+            ), patch(
+                "app.pipeline.save_retrieval_contexts"
+            ), patch(
+                "app.pipeline.build_nodes", return_value=nodes
+            ), patch(
+                "app.pipeline.VectorStoreIndex", side_effect=build_vector_index
+            ), patch(
+                "app.pipeline.BM25Index", side_effect=build_bm25_index
+            ), patch.object(manager, "put"):
+                processor = ContractProcessor(
+                    repository,
+                    settings,
+                    manager,
+                    embedding_model=object(),
+                )
+                result = processor.process(
+                    contract.contract_id,
+                    mode="reuse_existing",
+                )
+
+        self.assertEqual(result.status, "ready")
+        self.assertEqual(
+            call_order,
+            [
+                "vector_build",
+                "vector_persist",
+                "bm25_build",
+                "bm25_persist",
+            ],
+        )
+        bm25_index.persist.assert_called_once()
+
+    def test_bm25_failure_marks_contract_failed_with_stage(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = self._settings(root)
+            contract_dir = settings.contracts_dir / "c1"
+            contract_dir.mkdir(parents=True)
+            (contract_dir / "raw_content_list.json").write_text("[]", encoding="utf-8")
+            (contract_dir / "merged_content_list.json").write_text("[]", encoding="utf-8")
+            repository = ContractRepository(settings.database_path)
+            contract = repository.create("contract.pdf", contract_dir)
+            vector_index = SimpleNamespace(
+                storage_context=SimpleNamespace(persist=Mock())
+            )
+
+            with patch("app.pipeline.clean_content_list_file"), patch(
+                "app.pipeline.merge_content_list_file"
+            ), patch(
+                "app.pipeline.generate_contexts", return_value={}
+            ), patch(
+                "app.pipeline.save_retrieval_contexts"
+            ), patch(
+                "app.pipeline.build_nodes", return_value=[]
+            ), patch(
+                "app.pipeline.VectorStoreIndex", return_value=vector_index
+            ), patch(
+                "app.pipeline.BM25Index", side_effect=RuntimeError("tokenizer down")
+            ):
+                result = ContractProcessor(
+                    repository,
+                    settings,
+                    IndexManager(object()),
+                    embedding_model=object(),
+                ).process(contract.contract_id, mode="reuse_existing")
+
+        self.assertEqual(result.status, "failed")
+        self.assertIn("BM25 索引构建失败", result.error_message)
+        self.assertIn("tokenizer down", result.error_message)

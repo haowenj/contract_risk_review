@@ -69,6 +69,67 @@ def test_ready_contract_has_evaluation_entry_and_page_shows_default_case():
     assert "默认问题" in page_response.text
     assert 'name="question"' in page_response.text
     assert 'name="expected_source_object_indices"' in page_response.text
+    assert 'value="vector"' in page_response.text
+    assert 'value="bm25"' in page_response.text
+    assert 'value="hybrid"' in page_response.text
+
+
+def test_evaluation_route_passes_selected_retrieval_mode_to_single_run():
+    with TemporaryDirectory() as temp_dir:
+        client, service = build_client(Path(temp_dir))
+        service.create_single_evaluation_run.return_value = SimpleNamespace(
+            run_id="run-bm25"
+        )
+
+        response = client.post(
+            "/contracts/c1/evaluation/cases/7/run",
+            data={"retrieval_mode": "bm25"},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    service.create_single_evaluation_run.assert_called_once_with(
+        "c1", 7, retrieval_mode="bm25"
+    )
+
+
+def test_evaluation_page_renders_raw_retrieval_fields_without_rerank_or_answer():
+    with TemporaryDirectory() as temp_dir:
+        client, service = build_client(Path(temp_dir))
+        service.latest_evaluation_run_payload.return_value = {
+            "run_id": "run-raw",
+            "status": "ready",
+            "items": [
+                {
+                    "question": "付款方式？",
+                    "expected_source_object_indices": [7],
+                    "result": {
+                        "retrieval_mode": "bm25",
+                        "results": [
+                            {
+                                "node_id": "node-7",
+                                "source_object_index": 7,
+                                "score": 3.2,
+                                "text": "付款方式为银行转账。",
+                                "evidence_text": "付款方式为银行转账。",
+                                "node_type": "text",
+                            }
+                        ],
+                    },
+                }
+            ],
+        }
+
+        response = client.get("/contracts/c1/evaluation")
+
+    assert response.status_code == 200
+    assert "BM25 检索" in response.text
+    assert "排名 1" in response.text
+    assert "node-7" in response.text
+    assert "3.2" in response.text
+    assert "付款方式为银行转账。" in response.text
+    assert "Rerank Top10" not in response.text
+    assert "最终回答" not in response.text
 
 
 def test_evaluation_page_includes_back_to_top_button():
@@ -336,7 +397,9 @@ def test_single_run_route_schedules_requested_case():
 
     assert response.status_code == 303
     assert "run_id=run-single" in response.headers["location"]
-    service.create_single_evaluation_run.assert_called_once_with("c1", 7)
+    service.create_single_evaluation_run.assert_called_once_with(
+        "c1", 7, retrieval_mode="vector"
+    )
     service.execute_evaluation_run.assert_called_once_with("run-single")
 
 
