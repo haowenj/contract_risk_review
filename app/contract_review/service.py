@@ -9,7 +9,6 @@ from pydantic import BaseModel
 from app.contract_review.graph import build_contract_review_graph
 from app.contract_review.nodes import ContractReviewNodes, ProgressCallback
 from app.contract_review.schemas import (
-    RetrievalQueryRewrite,
     ReviewItemList,
     RiskDecision,
 )
@@ -49,14 +48,12 @@ class ContractReviewService:
         contract_service: Any,
         parse_llm: Any,
         review_llm: Any,
-        query_rewrite_llm: Any | None = None,
         progress_callback: ProgressCallback | None = None,
     ):
         self.contract_service = contract_service
         self.nodes = ContractReviewNodes(
             parse_llm=parse_llm,
             review_llm=review_llm,
-            query_rewrite_llm=query_rewrite_llm,
             contract_service=contract_service,
             progress_callback=progress_callback,
         )
@@ -143,10 +140,6 @@ def build_contract_review_service(
         review_llm=_build_structured_llm(
             RiskDecision,
             schema_name="contract_review_result",
-        ),
-        query_rewrite_llm=_build_structured_llm(
-            RetrievalQueryRewrite,
-            schema_name="contract_review_retrieval_query_rewrite",
         ),
         progress_callback=progress_callback,
     )

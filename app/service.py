@@ -113,9 +113,16 @@ class ContractService:
             raise ContractNotReadyError(contract)
 
         index = self.index_manager.get(contract)
+        try:
+            bm25_index = self.index_manager.get_bm25(contract)
+        except (FileNotFoundError, ValueError) as exc:
+            raise RuntimeError(
+                f"BM25索引不可用，请重新解析合同后再试: {exc}"
+            ) from exc
         retrieval = self.rag_pipeline.retrieve_evidence(
             index,
             query,
+            bm25_index=bm25_index,
             fallback_on_empty_selection=False,
         )
         selected_nodes = retrieval.get("selected_nodes", [])

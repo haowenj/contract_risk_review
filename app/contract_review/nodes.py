@@ -1,23 +1,17 @@
 from __future__ import annotations
 
-import unicodedata
 from collections.abc import Callable
 from typing import Any
 
-from app.contract_review.absence import scan_source_objects
 from app.contract_review.prompts import (
-    build_absence_result_prompt,
     build_parse_review_rules_prompt,
-    build_retrieval_query_rewrite_prompt,
     build_review_item_prompt,
 )
 from app.contract_review.schemas import (
-    AbsenceCheckMetadata,
     Evidence,
     ReviewItemList,
     ReviewResult,
     ReviewSummary,
-    RetrievalQueryRewrite,
     RiskDecision,
     parse_llm_response,
 )
@@ -25,33 +19,6 @@ from app.contract_review.state import ContractReviewState
 
 
 type ProgressCallback = Callable[[str, dict[str, Any]], None]
-
-_BOUNDED_ABSENCE_PREFIXES = (
-    "基于当前合同全文解析结果未发现",
-    "基于当前合同全文解析结果，未发现",
-    "基于当前合同全文解析结果,未发现",
-)
-_ABSOLUTE_ABSENCE_PHRASES = (
-    "肯定没有",
-    "绝对没有",
-    "确定没有",
-    "确认没有",
-    "完全没有",
-    "根本没有",
-    "断定没有",
-    "断定合同没有",
-    "肯定不存在",
-    "绝对不存在",
-    "确定不存在",
-    "确认不存在",
-    "完全不存在",
-    "根本不存在",
-    "断定不存在",
-)
-
-
-def _normalize_absence_claim(value: str) -> str:
-    return "".join(unicodedata.normalize("NFKC", value).casefold().split())
 
 
 class ContractReviewNodes:
@@ -61,12 +28,10 @@ class ContractReviewNodes:
         parse_llm: Any,
         review_llm: Any,
         contract_service: Any,
-        query_rewrite_llm: Any | None = None,
         progress_callback: ProgressCallback | None = None,
     ):
         self.parse_llm = parse_llm
         self.review_llm = review_llm
-        self.query_rewrite_llm = query_rewrite_llm
         self.contract_service = contract_service
         self.progress_callback = progress_callback
 
@@ -175,54 +140,13 @@ class ContractReviewNodes:
             raise RuntimeError(f"retrieve_evidence {item.id} failed") from exc
         return {"retrieved_evidence": merged_evidence}
 
-    def rewrite_query(
-        self,
-        state: ContractReviewState,
-    ) -> dict[str, Any]:
-        item = state["review_items"][state["current_item_index"]]
-        try:
-            if self.query_rewrite_llm is None:
-                raise ValueError("query_rewrite_llm is required for retry")
-            previous_query = state["current_retrieval_query"]
-            response = self.query_rewrite_llm.invoke(
-                build_retrieval_query_rewrite_prompt(
-                    item,
-                    attempted_queries=[previous_query],
-                    evidence=state["retrieved_evidence"],
-                    decision=state["current_decision"],
-                )
-            )
-            rewrite = parse_llm_response(response, RetrievalQueryRewrite)
-            if rewrite.retrieval_query == previous_query:
-                raise ValueError(
-                    "rewritten retrieval_query must differ from attempted query"
-                )
-            self._emit(
-                "retrieval_query_rewritten",
-                {
-                    "item_id": item.id,
-                    "next_attempt": 2,
-                    "previous_query": previous_query,
-                    "retrieval_query": rewrite.retrieval_query,
-                    "reason": rewrite.reason,
-                },
-            )
-        except Exception as exc:
-            raise RuntimeError(f"rewrite_query {item.id} failed") from exc
-        return {
-            "retrieval_attempt": 2,
-            "current_retrieval_query": rewrite.retrieval_query,
-            "absence_primary_keywords": rewrite.primary_keywords,
-            "absence_secondary_keywords": rewrite.secondary_keywords,
-        }
-
     def risk_decision(
         self,
         state: ContractReviewState,
     ) -> dict[str, Any]:
         item = state["review_items"][state["current_item_index"]]
         try:
-            evidence = state["absence_candidates"] or state["retrieved_evidence"]
+            evidence = state["retrieved_evidence"]
             response = self.review_llm.invoke(
                 build_review_item_prompt(item, evidence)
             )
@@ -241,107 +165,12 @@ class ContractReviewNodes:
                 risk_status="needs_review",
                 risk_level=None,
                 evidence_status="insufficient",
-                finding="两次检索均未获得足以支持判断的合同证据。",
+                finding="混合检索未获得足以支持判断的合同证据。",
                 risk_description="证据不足，无法可靠判断该审查项是否存在风险。",
                 suggestion="请人工核对合同全文及相关附件后再作判断。",
             )
         except Exception as exc:
             raise RuntimeError(f"insufficient_result {item.id} failed") from exc
-        return {"current_decision": decision}
-
-    def absence_check(
-        self,
-        state: ContractReviewState,
-    ) -> dict[str, Any]:
-        item = state["review_items"][state["current_item_index"]]
-        try:
-            self._emit(
-                "absence_check_started",
-                {
-                    "item_id": item.id,
-                    "retrieval_attempt": state["retrieval_attempt"],
-                },
-            )
-            self._emit(
-                "absence_keywords_generated",
-                {
-                    "item_id": item.id,
-                    "primary_keywords": state["absence_primary_keywords"],
-                    "secondary_keywords": state["absence_secondary_keywords"],
-                },
-            )
-            source_objects = self.contract_service.load_contract_content_objects(
-                state["contract_id"]
-            )
-            scan = scan_source_objects(
-                source_objects,
-                state["absence_primary_keywords"],
-                state["absence_secondary_keywords"],
-            )
-            candidates = [
-                Evidence.model_validate(value) for value in scan.candidates
-            ]
-            self._emit(
-                "absence_candidates_found",
-                {
-                    "item_id": item.id,
-                    "candidate_count": scan.candidate_count,
-                    "candidates": [
-                        value.model_dump(mode="json") for value in candidates
-                    ],
-                },
-            )
-        except Exception as exc:
-            raise RuntimeError(f"absence_check {item.id} failed") from exc
-        return {
-            "absence_candidates": candidates,
-            "absence_candidate_count": scan.candidate_count,
-        }
-
-    def absence_result(
-        self,
-        state: ContractReviewState,
-    ) -> dict[str, Any]:
-        item = state["review_items"][state["current_item_index"]]
-        try:
-            if state["absence_candidate_count"] != 0:
-                raise ValueError("absence_result requires zero scan candidates")
-            response = self.review_llm.invoke(
-                build_absence_result_prompt(
-                    item,
-                    primary_keywords=state["absence_primary_keywords"],
-                    secondary_keywords=state["absence_secondary_keywords"],
-                )
-            )
-            decision = parse_llm_response(response, RiskDecision)
-            if decision.evidence_status != "absence_verified":
-                raise ValueError("absence_result must return absence_verified")
-            if any(
-                phrase in _normalize_absence_claim(value)
-                for value in (
-                    decision.finding,
-                    decision.risk_description,
-                    decision.suggestion,
-                )
-                for phrase in _ABSOLUTE_ABSENCE_PHRASES
-            ):
-                raise ValueError("absence_result used an absolute absence claim")
-            if not decision.finding.startswith(_BOUNDED_ABSENCE_PREFIXES):
-                raise ValueError(
-                    "absence_result finding lacks parsed-content scope"
-                )
-            self._emit(
-                "absence_confirmed",
-                {
-                    "item_id": item.id,
-                    "primary_keywords": state["absence_primary_keywords"],
-                    "secondary_keywords": state["absence_secondary_keywords"],
-                    "candidate_count": 0,
-                    "decision": decision.model_dump(mode="json"),
-                },
-            )
-        except Exception as exc:
-            raise RuntimeError(f"absence_result {item.id} failed") from exc
         return {"current_decision": decision}
 
     def finalize_review_item(
@@ -353,19 +182,11 @@ class ContractReviewNodes:
             decision = state["current_decision"]
             if decision is None:
                 raise ValueError("current_decision is required")
-            evidence = state["absence_candidates"] or state["retrieved_evidence"]
-            absence_check = None
-            if state["absence_candidate_count"] is not None:
-                absence_check = AbsenceCheckMetadata(
-                    primary_keywords=state["absence_primary_keywords"],
-                    secondary_keywords=state["absence_secondary_keywords"],
-                    candidate_count=state["absence_candidate_count"],
-                )
+            evidence = state["retrieved_evidence"]
             result = ReviewResult(
                 item_id=item.id,
                 item_name=item.name,
                 evidence=evidence,
-                absence_check=absence_check,
                 **decision.model_dump(),
             )
             self._emit(

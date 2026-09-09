@@ -38,23 +38,6 @@ EVIDENCE = {
     "evidence_text": "付款期限为180日",
 }
 
-QUERY_REWRITE = {
-    "retrieval_query": "乙方权利义务、转委托、第三方履约相关约定",
-    "reason": "扩展分包和转包的近义表达与相关章节名称",
-    "primary_keywords": ["分包", "转包", "转委托", "委托第三方履行"],
-    "secondary_keywords": ["第三方", "书面同意"],
-}
-
-ABSENCE_DECISION = {
-    "risk_status": "risk",
-    "risk_level": "medium",
-    "evidence_status": "absence_verified",
-    "finding": "基于当前合同全文解析结果，未发现明确限制乙方分包或转包的条款。",
-    "risk_description": "两次语义检索及全文关键词核验均未发现对应约定。",
-    "suggestion": "建议补充未经书面同意不得分包或转包的明确条款。",
-}
-
-
 class FakeLLM:
     def __init__(self, payload):
         self.payload = payload
@@ -127,7 +110,7 @@ def test_default_llms_use_vllm_openai_reasoning_protocol():
             contract_service=FakeContractService(ready_contract()),
         )
 
-    assert factory.call_count == 3
+    assert factory.call_count == 2
     for call in factory.call_args_list:
         assert call.kwargs["reasoning_effort"] == "none"
         assert "extra_body" not in call.kwargs
@@ -196,50 +179,17 @@ def test_service_runs_graph_and_returns_json_serializable_result():
     ]
 
 
-def test_service_retries_with_rewritten_query_after_empty_evidence():
+def test_service_finalizes_empty_retrieval_as_insufficient_without_retry():
     contract_service = SequencedEvidenceContractService(
         ready_contract(),
-        evidence_sequences=[[], [EVIDENCE]],
+        evidence_sequences=[[]],
     )
-    service = ContractReviewService(
-        contract_service=contract_service,
-        parse_llm=FakeLLM(ITEMS),
-        review_llm=FakeLLM(DECISION),
-        query_rewrite_llm=FakeLLM(QUERY_REWRITE),
-    )
+    service = build_service(contract_service)
 
     result = service.run("contract-1", "付款期限不得超过90日")
 
-    assert result["review_results"][0]["risk_status"] == "risk"
-    assert contract_service.searches == [
-        ("contract-1", "合同约定的付款期限是多久"),
-        ("contract-1", QUERY_REWRITE["retrieval_query"]),
-    ]
-
-
-def test_service_serializes_zero_candidate_absence_audit():
-    contract_service = SequencedEvidenceContractService(
-        ready_contract(),
-        evidence_sequences=[[], []],
-        source_objects=[
-            {"type": "text", "text": "付款与验收条款", "page_idx": 1},
-        ],
-    )
-    service = ContractReviewService(
-        contract_service=contract_service,
-        parse_llm=FakeLLM(ITEMS),
-        review_llm=FakeLLM(ABSENCE_DECISION),
-        query_rewrite_llm=FakeLLM(QUERY_REWRITE),
-    )
-
-    result = service.run("contract-1", "付款期限不得超过90日")
-
-    assert result["review_results"][0]["absence_check"] == {
-        "primary_keywords": ["分包", "转包", "转委托", "委托第三方履行"],
-        "secondary_keywords": ["第三方", "书面同意"],
-        "candidate_count": 0,
-    }
-    assert result["review_results"][0]["evidence_status"] == "absence_verified"
-    assert len(contract_service.searches) == 2
-    assert contract_service.content_loads == ["contract-1"]
-    json.dumps(result, ensure_ascii=False)
+    assert result["review_results"][0]["risk_status"] == "needs_review"
+    assert result["review_results"][0]["evidence_status"] == "insufficient"
+    assert result["review_results"][0]["evidence"] == []
+    assert len(contract_service.searches) == 1
+    assert contract_service.content_loads == []
