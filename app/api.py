@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+import uuid
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
@@ -30,6 +31,17 @@ from app.evaluation_service import (
     EvaluationRetrievalContextInvalidError,
     EvaluationRetrievalContextNotFoundError,
     EvaluationStaleError,
+)
+from app.evidence_review.repository import (
+    EvidenceReviewRepository,
+    RuleSetRecord,
+    RuleSetTransitionError,
+)
+from app.evidence_review.rule_import import (
+    RuleDocumentExtractor,
+    RuleSetImportService,
+    build_rule_parse_llm,
+    validate_rule_upload,
 )
 from app.index_manager import IndexManager
 from app.markdown import render_markdown
@@ -70,11 +82,29 @@ def _record_payload(record: Any) -> dict[str, Any]:
     return record.to_dict()
 
 
+def _rule_set_payload(record: RuleSetRecord) -> dict[str, Any]:
+    """Return only fields that are safe and useful to browser clients."""
+    return {
+        "rule_set_id": record.rule_set_id,
+        "name": record.name,
+        "version": record.version,
+        "status": record.status,
+        "source_filename": record.source_filename,
+        "parsed_rules": record.parsed_rules,
+        "created_at": record.created_at,
+        "updated_at": record.updated_at,
+        "activated_at": record.activated_at,
+        "error_message": record.error_message,
+    }
+
+
 def create_app(
     *,
     settings: Settings | None = None,
     service: ContractService | None = None,
     contract_review_web_service: ContractReviewWebService | Any | None = None,
+    rule_set_repository: EvidenceReviewRepository | None = None,
+    rule_set_import_service: RuleSetImportService | Any | None = None,
 ) -> FastAPI:
     settings = settings or load_settings()
     active_service = service or build_default_service(settings)
@@ -88,6 +118,9 @@ def create_app(
         )
     )
     active_contract_review_web_service.recover_interrupted_runs()
+    active_rule_set_repository = rule_set_repository or EvidenceReviewRepository(
+        settings.database_path
+    )
     application = FastAPI(title="Contract Risk Review")
     templates = Jinja2Templates(
         directory=str(Path(__file__).resolve().parent / "templates")
@@ -111,6 +144,46 @@ def create_app(
                 "error": error,
             },
         )
+
+    def render_rule_sets_page(
+        request: Request,
+        *,
+        error: str | None = None,
+        status_code: int = 200,
+        submitted_name: str = "",
+    ) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request=request,
+            name="rule_sets.html",
+            status_code=status_code,
+            context={
+                "rule_sets": active_rule_set_repository.list_rule_sets(),
+                "error": error,
+                "submitted_name": submitted_name,
+            },
+        )
+
+    def get_rule_set_or_404(rule_set_id: str) -> RuleSetRecord:
+        record = active_rule_set_repository.get_rule_set(rule_set_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="rule set not found")
+        return record
+
+    def execute_rule_set_import(rule_set_id: str) -> None:
+        importer = rule_set_import_service
+        if importer is None:
+            importer = RuleSetImportService(
+                repository=active_rule_set_repository,
+                extractor=RuleDocumentExtractor(
+                    svr_url=settings.mineru_url,
+                    backend=settings.mineru_backend,
+                    server_url=settings.mineru_server_url,
+                ),
+                parse_llm=build_rule_parse_llm(),
+                rule_sets_dir=Path(settings.rule_sets_dir),
+                max_upload_bytes=settings.max_rule_upload_bytes,
+            )
+        importer.import_rule_set(rule_set_id)
 
     def render_review_page(
         request: Request,
@@ -390,6 +463,10 @@ def create_app(
             for record in active_service.list_contracts()
         ]
 
+    @application.get("/api/rule-sets/{rule_set_id}")
+    def get_rule_set(rule_set_id: str) -> dict[str, Any]:
+        return _rule_set_payload(get_rule_set_or_404(rule_set_id))
+
     @application.post("/api/contracts/{contract_id}/reprocess", status_code=202)
     def reprocess_contract(
         contract_id: str,
@@ -474,6 +551,83 @@ def create_app(
     @application.get("/", response_class=HTMLResponse)
     def home(request: Request) -> HTMLResponse:
         return render_dashboard(request)
+
+    @application.get("/rule-sets", response_class=HTMLResponse)
+    def rule_sets_page(request: Request) -> HTMLResponse:
+        return render_rule_sets_page(request)
+
+    @application.post("/rule-sets", response_class=HTMLResponse)
+    async def upload_rule_set(
+        request: Request,
+        background_tasks: BackgroundTasks,
+        name: str = Form(...),
+        file: UploadFile = File(...),
+    ) -> Response:
+        normalized_name = name.strip()
+        try:
+            if not normalized_name:
+                raise ValueError("规则集名称不能为空。")
+            upload = validate_rule_upload(
+                file.filename or "",
+                await file.read(),
+                max_bytes=settings.max_rule_upload_bytes,
+            )
+            upload_dir = (
+                Path(settings.rule_sets_dir)
+                / "uploads"
+                / str(uuid.uuid4())
+            )
+            upload_dir.mkdir(parents=True, exist_ok=False)
+            source_path = upload_dir / f"source{upload.suffix}"
+            source_path.write_bytes(upload.content)
+            record = active_rule_set_repository.create_rule_set(
+                name=normalized_name,
+                source_filename=upload.filename,
+                source_path=source_path,
+                source_sha256=upload.sha256,
+            )
+        except ValueError as exc:
+            return render_rule_sets_page(
+                request,
+                error=str(exc),
+                status_code=400,
+                submitted_name=name,
+            )
+
+        background_tasks.add_task(execute_rule_set_import, record.rule_set_id)
+        return RedirectResponse(
+            url=f"/rule-sets/{record.rule_set_id}",
+            status_code=303,
+        )
+
+    @application.get(
+        "/rule-sets/{rule_set_id}",
+        response_class=HTMLResponse,
+    )
+    def rule_set_detail_page(
+        request: Request,
+        rule_set_id: str,
+    ) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request=request,
+            name="rule_set_detail.html",
+            context={"rule_set": get_rule_set_or_404(rule_set_id)},
+        )
+
+    @application.post("/rule-sets/{rule_set_id}/activate")
+    def activate_rule_set(rule_set_id: str) -> Response:
+        get_rule_set_or_404(rule_set_id)
+        try:
+            active_rule_set_repository.activate_rule_set(rule_set_id)
+        except RuleSetTransitionError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="only a draft rule set can be activated",
+            ) from exc
+        return RedirectResponse(
+            url=f"/rule-sets/{rule_set_id}",
+            status_code=303,
+        )
 
     @application.post("/upload", response_class=HTMLResponse)
     async def upload_page(

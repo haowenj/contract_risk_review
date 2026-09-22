@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ rule_set.name }} · 风险规则库</title>
+  <style>
+    :root { color:#172033; background:#f3f6fa; font:15px/1.55 "Avenir Next","Segoe UI",sans-serif; }
+    * { box-sizing:border-box; } body{margin:0} a{color:#315b8c}.topbar{min-height:64px;padding:0 30px;background:#172033;color:white;display:flex;align-items:center;justify-content:space-between}.topbar a{color:white;text-decoration:none}
+    main{width:min(1080px,calc(100% - 40px));margin:32px auto 64px}h1{margin:0}.muted{color:#637189}.meta{display:flex;gap:14px;flex-wrap:wrap;margin:8px 0 24px}.badge{padding:3px 9px;border-radius:999px;background:#e8eef6;font-size:13px}.panel,.item{border:1px solid #d9e2ec;border-radius:14px;background:white;box-shadow:0 8px 24px #1020380a}.panel{padding:20px;margin:18px 0}.item{padding:20px;margin:12px 0}.item h3{margin:0 0 8px}.source-number{color:#315b8c;margin-right:7px}.path{color:#637189;font-size:13px}.columns{display:grid;grid-template-columns:1fr 1fr;gap:18px}.group{padding:13px;border-radius:10px;background:#f7f9fc}.group h4{margin:0 0 7px}.group ul{margin:6px 0;padding-left:20px}.warning,.error{padding:12px 14px;border-radius:9px}.warning{background:#fff8e6;color:#92400e}.error{background:#fff1f2;color:#b91c1c}.actions{margin:20px 0}button{border:0;border-radius:8px;padding:10px 15px;background:#172033;color:white;font:inherit;cursor:pointer}.status{font-weight:700}.pages{color:#637189;font-size:13px}@media(max-width:720px){.columns{grid-template-columns:1fr}main{width:calc(100% - 24px)}}
+  </style>
+</head>
+<body data-rule-set-id="{{ rule_set.rule_set_id }}" data-status="{{ rule_set.status }}">
+  <header class="topbar"><strong>风险规则库</strong><a href="/rule-sets">返回规则列表</a></header>
+  <main>
+    <h1>{{ rule_set.name }} · v{{ rule_set.version }}</h1>
+    <div class="meta"><span class="badge status">{{ rule_set.status }}</span><span>{{ rule_set.source_filename }}</span><span>ID {{ rule_set.rule_set_id[:8] }}</span></div>
+    {% if rule_set.status in ['queued', 'processing'] %}
+      <section class="panel"><strong>正在解析规则文件…</strong><p class="muted">页面会自动刷新，完成后可预览并启用。</p></section>
+    {% elif rule_set.status == 'failed' %}
+      <div class="error" role="alert">{{ rule_set.error_message or '规则文件解析失败，请检查文件内容后重试。' }}</div>
+    {% else %}
+      {% set parsed = rule_set.parsed_rules %}
+      <section class="panel">
+        <h2>{{ parsed.document_title }}</h2>
+        <p>章节 {{ parsed.summary.section_count }} · 审核项 {{ parsed.summary.review_item_count }} · 流程项 {{ parsed.summary.process_control_count }}</p>
+        {% for section in parsed.sections %}<div style="margin-left:{{ (section.level - 1) * 20 }}px"><span class="source-number">{{ section.source_number or '' }}</span>{{ section.title }} <span class="pages">第 {{ section.source_pages|join('、') }} 页</span></div>{% endfor %}
+      </section>
+      {% for warning in parsed.warnings or [] %}<p class="warning">{{ warning }}</p>{% endfor %}
+      {% for item in parsed.review_items %}
+        <article class="item">
+          <div class="path">{{ item.section_path|join(' / ') }}</div>
+          <h3><span class="source-number">{{ item.source_number or '' }}</span>{{ item.name }}</h3>
+          <p>{{ item.rule_text }}</p>
+          <p class="pages">第 {{ item.source_pages|join('、') }} 页 · {{ item.item_kind }} · {{ item.evidence_scope }} · {{ item.decision_mode }}</p>
+          <div class="columns">
+            <section class="group"><h4>合同取证与事实</h4><ul>{% for query in item.retrieval_queries %}<li>{{ query }}</li>{% endfor %}</ul>{% for fact in item.fact_requirements %}<p><strong>{{ fact.label }}</strong>（{{ fact.fact_key }} / {{ fact.value_type }}{% if fact.required %} / 必填{% endif %}）</p>{% else %}<p class="muted">无结构化事实要求</p>{% endfor %}</section>
+            <section class="group"><h4>外部或内部查询需求</h4>{% for research in item.research_requirements %}<p>{{ research.source_type }} · {{ research.target_type }}</p><p>查询：{{ research.query_topics|join('、') }}</p><p>比对：{{ research.comparison_points|join('、') }}</p>{% else %}<p class="muted">无需额外查询</p>{% endfor %}</section>
+          </div>
+        </article>
+      {% endfor %}
+      {% if rule_set.status == 'draft' %}<form class="actions" action="/rule-sets/{{ rule_set.rule_set_id }}/activate" method="post"><button type="submit">确认并启用此版本</button></form>{% endif %}
+    {% endif %}
+  </main>
+  <script>
+    const status = document.body.dataset.status;
+    if (['queued','processing'].includes(status)) {
+      const id = encodeURIComponent(document.body.dataset.ruleSetId);
+      setTimeout(async () => {
+        const response = await fetch(`/api/rule-sets/${id}`, {cache:'no-store'});
+        if (response.ok) location.reload();
+      }, 3000);
+    }
+  </script>
+</body>
+</html>

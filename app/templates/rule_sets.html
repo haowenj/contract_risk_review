@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>风险规则库</title>
+  <style>
+    :root { color:#172033; background:#f3f6fa; font:15px/1.55 "Avenir Next","Segoe UI",sans-serif; }
+    * { box-sizing:border-box; }
+    body { margin:0; }
+    a { color:#315b8c; }
+    .topbar { min-height:64px; padding:0 30px; background:#172033; color:white; display:flex; align-items:center; justify-content:space-between; }
+    .topbar a { color:white; text-decoration:none; }
+    main { width:min(1040px,calc(100% - 40px)); margin:32px auto 64px; }
+    h1 { margin:0 0 6px; }
+    .muted { color:#637189; }
+    .panel,.row { border:1px solid #d9e2ec; border-radius:14px; background:white; box-shadow:0 8px 24px #1020380a; }
+    .panel { padding:22px; margin:24px 0 34px; }
+    form { display:grid; grid-template-columns:minmax(180px,1fr) minmax(250px,2fr) auto; gap:12px; align-items:end; }
+    label span { display:block; margin-bottom:6px; font-weight:650; }
+    input { width:100%; min-height:42px; border:1px solid #bdcadd; border-radius:8px; padding:8px 10px; font:inherit; }
+    button,.button { min-height:42px; border:0; border-radius:8px; padding:9px 15px; background:#172033; color:white; font:inherit; cursor:pointer; text-decoration:none; }
+    .error { padding:12px 14px; border:1px solid #fecaca; border-radius:9px; background:#fff7f7; color:#b91c1c; }
+    ul { list-style:none; padding:0; display:grid; gap:10px; }
+    .row { padding:17px 20px; display:flex; align-items:center; justify-content:space-between; gap:20px; }
+    .row strong,.row small { display:block; }
+    .status { font-weight:700; }
+    .status-draft { color:#b45309; } .status-active { color:#15803d; } .status-failed { color:#b91c1c; } .status-processing,.status-queued { color:#2563eb; }
+    .empty { text-align:center; padding:36px; border:1px dashed #aebed0; border-radius:12px; color:#637189; }
+    @media(max-width:720px){ form{grid-template-columns:1fr}.row{align-items:flex-start;flex-direction:column}main{width:calc(100% - 24px)} }
+  </style>
+</head>
+<body data-has-pending="{{ 'true' if rule_sets|selectattr('status', 'in', ['queued', 'processing'])|list else 'false' }}">
+  <header class="topbar"><strong>风险规则库</strong><a href="/">返回合同任务</a></header>
+  <main>
+    <h1>风险规则库</h1>
+    <p class="muted">上传业务规则文件，系统先解析结构和取证需求，确认后再启用。</p>
+    {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+    <section class="panel">
+      <form action="/rule-sets" method="post" enctype="multipart/form-data">
+        <label><span>规则集名称</span><input name="name" value="{{ submitted_name }}" required></label>
+        <label><span>规则文件</span><input name="file" type="file" accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown" required></label>
+        <button type="submit">上传并解析</button>
+      </form>
+    </section>
+    <h2>已上传规则</h2>
+    <ul>
+      {% for item in rule_sets %}
+        <li class="row">
+          <div><strong>{{ item.name }} · v{{ item.version }}</strong><small class="muted">{{ item.source_filename }} · {{ item.created_at }}</small></div>
+          <div><span class="status status-{{ item.status }}">{{ item.status }}</span>　<a href="/rule-sets/{{ item.rule_set_id }}">查看</a></div>
+        </li>
+      {% else %}<li class="empty">还没有规则集。</li>{% endfor %}
+    </ul>
+  </main>
+  <script>
+    if (document.body.dataset.hasPending === 'true') setTimeout(() => location.reload(), 5000);
+  </script>
+</body>
+</html>
