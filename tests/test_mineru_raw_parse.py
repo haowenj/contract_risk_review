@@ -1,4 +1,5 @@
 import io
+import json
 import zipfile
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -131,3 +132,172 @@ class MinerURawParseTest(TestCase):
                 (root / "images" / "table.jpg").read_bytes(),
                 b"table-jpeg-bytes",
             )
+
+    def test_run_parse_falls_back_silently_to_v1_zip_when_tasks_is_missing(self):
+        import mineru_raw_parse
+
+        structured_content = {
+            "pages": [
+                {
+                    "page_idx": 0,
+                    "blocks": [
+                        {
+                            "type": "paragraph_title",
+                            "bbox": [0.1, 0.1, 0.9, 0.2],
+                            "level": 2,
+                            "content": "合同标题",
+                        },
+                        {
+                            "type": "text",
+                            "bbox": [0.1, 0.2, 0.9, 0.3],
+                            "content": "contract text",
+                        },
+                        {
+                            "type": "table",
+                            "bbox": [0.1, 0.3, 0.9, 0.5],
+                            "content": "<table><tr><td>付款</td></tr></table>",
+                            "image_source": "images/table.jpg",
+                            "captions": [{"content": "付款计划"}],
+                            "footnotes": [{"content": "单位：万元"}],
+                        },
+                        {
+                            "type": "image",
+                            "bbox": [0.1, 0.5, 0.9, 0.8],
+                            "content": "",
+                            "image_source": "images/seal.jpg",
+                            "captions": [{"content": "印章"}],
+                            "footnotes": [],
+                        },
+                    ],
+                }
+            ]
+        }
+        archive_buffer = io.BytesIO()
+        with zipfile.ZipFile(archive_buffer, "w") as archive:
+            archive.writestr(
+                "structured_content.json",
+                json.dumps(structured_content, ensure_ascii=False),
+            )
+            archive.writestr("images/seal.jpg", b"seal-image")
+            archive.writestr("images/table.jpg", b"table-image")
+
+        calls: list[tuple[str, str]] = []
+        job_requests: list[dict[str, object]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append((request.method, request.url.path))
+            if request.method == "POST" and request.url.path == "/tasks":
+                return httpx.Response(404, json={"detail": "Not Found"})
+            if request.method == "POST" and request.url.path == "/v1/uploads":
+                return httpx.Response(
+                    200,
+                    json={
+                        "id": "upload-1",
+                        "upload_url": "/v1/uploads/upload-1/content",
+                        "upload_headers": {
+                            "content-type": "application/octet-stream"
+                        },
+                    },
+                )
+            if request.method == "PUT" and request.url.path.endswith("/content"):
+                return httpx.Response(200, json={})
+            if request.method == "POST" and request.url.path.endswith("/complete"):
+                return httpx.Response(200, json={"file": {"id": "input-file"}})
+            if request.method == "POST" and request.url.path == "/v1/parse/jobs":
+                job_requests.append(json.loads(request.content))
+                return httpx.Response(202, json={"job_id": "job-1"})
+            if request.method == "GET" and request.url.path == "/v1/parse/jobs/job-1":
+                return httpx.Response(
+                    200,
+                    json={
+                        "status": "completed",
+                        "files": [
+                            {
+                                "status": "completed",
+                                "output_files": {
+                                    "zip": {"file_id": "output-file", "bytes": 10}
+                                },
+                            }
+                        ],
+                    },
+                )
+            if (
+                request.method == "GET"
+                and request.url.path == "/v1/files/output-file/content"
+            ):
+                return httpx.Response(
+                    200,
+                    headers={"content-type": "application/octet-stream"},
+                    content=archive_buffer.getvalue(),
+                )
+            if request.method == "DELETE" and request.url.path.startswith(
+                "/v1/files/"
+            ):
+                return httpx.Response(200, json={})
+            return httpx.Response(500)
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            pdf_path = root / "contract.pdf"
+            output_path = root / "raw.json"
+            pdf_path.write_bytes(b"%PDF-test")
+            client = httpx.Client(transport=httpx.MockTransport(handler))
+            with self.assertNoLogs("mineru_raw_parse", level="WARNING"):
+                mineru_raw_parse.run_parse(
+                    pdf_path,
+                    output_path,
+                    client=client,
+                    svr_url="http://mineru.test",
+                    backend="hybrid-engine",
+                    server_url=None,
+                    poll_interval=0,
+                )
+            client.close()
+
+            self.assertEqual(
+                json.loads(output_path.read_text(encoding="utf-8")),
+                [
+                    {
+                        "type": "text",
+                        "bbox": [0.1, 0.1, 0.9, 0.2],
+                        "text": "合同标题",
+                        "text_level": 2,
+                        "page_idx": 0,
+                    },
+                    {
+                        "type": "text",
+                        "bbox": [0.1, 0.2, 0.9, 0.3],
+                        "text": "contract text",
+                        "page_idx": 0,
+                    },
+                    {
+                        "type": "table",
+                        "bbox": [0.1, 0.3, 0.9, 0.5],
+                        "table_body": "<table><tr><td>付款</td></tr></table>",
+                        "table_caption": ["付款计划"],
+                        "table_footnote": ["单位：万元"],
+                        "img_path": "images/table.jpg",
+                        "page_idx": 0,
+                    },
+                    {
+                        "type": "image",
+                        "bbox": [0.1, 0.5, 0.9, 0.8],
+                        "image_caption": ["印章"],
+                        "image_footnote": [],
+                        "img_path": "images/seal.jpg",
+                        "page_idx": 0,
+                    },
+                ],
+            )
+            self.assertEqual(
+                (root / "images" / "seal.jpg").read_bytes(), b"seal-image"
+            )
+            self.assertEqual(
+                (root / "images" / "table.jpg").read_bytes(), b"table-image"
+            )
+
+        self.assertEqual(len(job_requests), 1)
+        self.assertEqual(job_requests[0]["ocr_mode"], "auto")
+        self.assertEqual(job_requests[0]["output_formats"], ["zip"])
+        self.assertIn(("DELETE", "/v1/files/input-file"), calls)
+        self.assertIn(("DELETE", "/v1/files/output-file"), calls)

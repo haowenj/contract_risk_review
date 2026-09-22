@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import json
 import logging
@@ -9,13 +10,11 @@ import os
 import time
 from collections import Counter
 from collections.abc import Mapping
-from pathlib import Path
-from pathlib import PurePosixPath
-from zipfile import BadZipFile, ZipFile
+from pathlib import Path, PurePosixPath
+from zipfile import BadZipFile, ZipFile, is_zipfile
 
 import httpx
 from dotenv import load_dotenv
-
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +71,21 @@ def _response_json(response: httpx.Response, label: str) -> dict[str, object]:
     return payload
 
 
+def _v1_response_json(
+    response: httpx.Response,
+    label: str,
+) -> dict[str, object]:
+    if response.status_code not in {200, 202}:
+        raise RuntimeError(
+            f"MinerU v1 {label}失败：HTTP {response.status_code}"
+        )
+    return _response_json(response, f"v1 {label}")
+
+
+class _LegacyEndpointUnavailable(RuntimeError):
+    """Signal that this server exposes MinerU v1 instead of /tasks."""
+
+
 def _normalize_zip_name(name: str) -> str:
     normalized = name.replace("\\", "/")
     path = PurePosixPath(normalized)
@@ -90,6 +104,83 @@ def _parse_content_list(raw_content: bytes) -> list[object]:
     return content_list
 
 
+def _structured_annotation_texts(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [
+        content.strip()
+        for annotation in value
+        if isinstance(annotation, dict)
+        and isinstance((content := annotation.get("content")), str)
+        and content.strip()
+    ]
+
+
+def _structured_content_list(raw_content: bytes) -> list[object]:
+    try:
+        payload = json.loads(raw_content)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("MinerU structured content 不是有效 JSON") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("pages"), list):
+        raise RuntimeError("MinerU structured content 缺少 pages")
+
+    content_list: list[object] = []
+    for fallback_page_idx, page in enumerate(payload["pages"]):
+        if not isinstance(page, dict):
+            continue
+        page_idx = page.get("page_idx")
+        if not isinstance(page_idx, int):
+            page_idx = fallback_page_idx
+        blocks = page.get("blocks")
+        if not isinstance(blocks, list):
+            continue
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            block_type = block.get("type")
+            content = block.get("content")
+            item: dict[str, object] = {"page_idx": page_idx}
+            bbox = block.get("bbox")
+            if isinstance(bbox, list):
+                item["bbox"] = bbox
+
+            if block_type == "table":
+                item["type"] = "table"
+                if isinstance(content, str) and content.strip():
+                    item["table_body"] = content.strip()
+                item["table_caption"] = _structured_annotation_texts(
+                    block.get("captions")
+                )
+                item["table_footnote"] = _structured_annotation_texts(
+                    block.get("footnotes")
+                )
+            elif block_type in {"image", "chart"}:
+                item["type"] = "image"
+                item["image_caption"] = _structured_annotation_texts(
+                    block.get("captions")
+                )
+                item["image_footnote"] = _structured_annotation_texts(
+                    block.get("footnotes")
+                )
+            else:
+                item["type"] = (
+                    block_type
+                    if block_type in {"header", "footer", "page_number"}
+                    else "text"
+                )
+                if isinstance(content, str) and content.strip():
+                    item["text"] = content.strip()
+                level = block.get("level")
+                if block_type == "paragraph_title" and isinstance(level, int):
+                    item["text_level"] = level
+
+            image_source = block.get("image_source")
+            if isinstance(image_source, str) and image_source.strip():
+                item["img_path"] = image_source.strip()
+            content_list.append(item)
+    return content_list
+
+
 def _read_content_list_archive(
     archive_bytes: bytes,
 ) -> tuple[str, bytes, list[object]]:
@@ -103,14 +194,39 @@ def _read_content_list_archive(
                     "_content_list.json"
                 )
             ]
-            if len(matches) != 1:
+            if len(matches) == 1:
+                content_member = _normalize_zip_name(matches[0].filename)
+                raw_content = archive.read(matches[0])
+                return content_member, raw_content, _parse_content_list(raw_content)
+            if len(matches) > 1:
                 raise RuntimeError(
                     "MinerU 结果中应有 1 个 *_content_list.json，"
                     f"实际找到 {len(matches)} 个"
                 )
-            content_member = _normalize_zip_name(matches[0].filename)
-            raw_content = archive.read(matches[0])
-            return content_member, raw_content, _parse_content_list(raw_content)
+
+            structured_matches = [
+                info
+                for info in archive.infolist()
+                if not info.is_dir()
+                and PurePosixPath(_normalize_zip_name(info.filename)).name
+                == "structured_content.json"
+            ]
+            if len(structured_matches) != 1:
+                raise RuntimeError(
+                    "MinerU 结果中既无 content list，也无唯一的 "
+                    "structured_content.json"
+                )
+            content_member = _normalize_zip_name(
+                structured_matches[0].filename
+            )
+            content_list = _structured_content_list(
+                archive.read(structured_matches[0])
+            )
+            raw_content = json.dumps(
+                content_list,
+                ensure_ascii=False,
+            ).encode("utf-8")
+            return content_member, raw_content, content_list
     except RuntimeError:
         raise
     except (OSError, ValueError, BadZipFile) as exc:
@@ -191,6 +307,240 @@ def _write_referenced_images(
         raise RuntimeError(f"无法提取 MinerU 图片：{exc}") from exc
 
 
+def _run_legacy_task(
+    input_path: Path,
+    *,
+    form: Mapping[str, str],
+    svr_url: str,
+    backend: str,
+    server_url: str | None,
+    client: httpx.Client,
+    poll_interval: float,
+) -> bytes:
+    request_form = {**form, "backend": backend}
+    if server_url:
+        request_form["server_url"] = server_url.rstrip("/")
+    content_type = mimetypes.guess_type(input_path.name)[0] or (
+        "application/octet-stream"
+    )
+
+    try:
+        with input_path.open("rb") as input_file:
+            response = client.post(
+                f"{svr_url.rstrip('/')}/tasks",
+                data=request_form,
+                files={"files": (input_path.name, input_file, content_type)},
+            )
+    except (OSError, httpx.HTTPError) as exc:
+        raise RuntimeError(f"提交 MinerU 任务失败：{exc}") from exc
+    if response.status_code in {404, 405}:
+        raise _LegacyEndpointUnavailable
+    if response.status_code != 202:
+        raise RuntimeError(
+            f"提交 MinerU 任务失败：HTTP {response.status_code} {response.text}"
+        )
+
+    submission = _response_json(response, "任务提交")
+    task_id = submission.get("task_id")
+    status_url = submission.get("status_url")
+    result_url = submission.get("result_url")
+    if not all(
+        isinstance(value, str) and value
+        for value in (task_id, status_url, result_url)
+    ):
+        raise RuntimeError("MinerU 返回了无效任务响应")
+
+    deadline = time.monotonic() + TASK_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        try:
+            response = client.get(status_url)
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"查询 MinerU 任务失败：{exc}") from exc
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"查询 MinerU 任务失败：HTTP {response.status_code} {response.text}"
+            )
+
+        status_payload = _response_json(response, "任务状态")
+        status = status_payload.get("status")
+        if status in {"pending", "processing"}:
+            time.sleep(poll_interval)
+            continue
+        if status == "completed":
+            break
+        if status == "failed":
+            raise RuntimeError(f"MinerU 任务失败：{status_payload}")
+        raise RuntimeError(f"MinerU 返回未知任务状态：{status!r}")
+    else:
+        raise RuntimeError("等待 MinerU 任务超时")
+
+    try:
+        response = client.get(result_url)
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"下载 MinerU 结果失败：{exc}") from exc
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"下载 MinerU 结果失败：HTTP {response.status_code} {response.text}"
+        )
+    if "application/zip" not in response.headers.get("content-type", "").lower():
+        raise RuntimeError("MinerU 结果不是 ZIP")
+    return response.content
+
+
+def _run_v1_task(
+    input_path: Path,
+    *,
+    form: Mapping[str, str],
+    svr_url: str,
+    backend: str,
+    client: httpx.Client,
+    poll_interval: float,
+) -> bytes:
+    base_url = svr_url.rstrip("/")
+    input_file_id: str | None = None
+    output_file_id: str | None = None
+    remove_input_file = False
+    try:
+        try:
+            content = input_path.read_bytes()
+        except OSError as exc:
+            raise RuntimeError(f"读取 MinerU 输入文件失败：{exc}") from exc
+        digest = hashlib.sha256(content).hexdigest()
+        content_type = mimetypes.guess_type(input_path.name)[0] or (
+            "application/octet-stream"
+        )
+        upload = _v1_response_json(
+            client.post(
+                f"{base_url}/v1/uploads",
+                json={
+                    "filename": input_path.name,
+                    "bytes": len(content),
+                    "mime_type": content_type,
+                    "purpose": "parse",
+                    "sha256sum": digest,
+                },
+            ),
+            "创建上传",
+        )
+        upload_id = upload.get("id")
+        if not isinstance(upload_id, str) or not upload_id:
+            raise RuntimeError("MinerU v1 返回了无效 upload id")
+
+        file_payload = upload.get("file")
+        if upload.get("status") != "completed" or not isinstance(
+            file_payload, dict
+        ):
+            upload_url = upload.get("upload_url")
+            if not isinstance(upload_url, str) or not upload_url:
+                upload_url = f"{base_url}/v1/uploads/{upload_id}/content"
+            elif upload_url.startswith("/"):
+                upload_url = f"{base_url}{upload_url}"
+            headers = upload.get("upload_headers")
+            if not isinstance(headers, dict):
+                headers = {"content-type": "application/octet-stream"}
+            upload_response = client.put(
+                upload_url,
+                headers={str(key): str(value) for key, value in headers.items()},
+                content=content,
+            )
+            if upload_response.status_code != 200:
+                raise RuntimeError(
+                    "MinerU v1 上传内容失败："
+                    f"HTTP {upload_response.status_code}"
+                )
+            completed = _v1_response_json(
+                client.post(
+                    f"{base_url}/v1/uploads/{upload_id}/complete",
+                    json={"sha256sum": digest},
+                ),
+                "完成上传",
+            )
+            file_payload = completed.get("file")
+            remove_input_file = True
+
+        input_file_id = (
+            file_payload.get("id") if isinstance(file_payload, dict) else None
+        )
+        if not isinstance(input_file_id, str) or not input_file_id:
+            raise RuntimeError("MinerU v1 返回了无效 input file id")
+
+        ocr_mode = "ocr" if form.get("parse_method") == "ocr" else "auto"
+        tier = "basic" if backend == "pipeline" else "standard"
+        job = _v1_response_json(
+            client.post(
+                f"{base_url}/v1/parse/jobs",
+                json={
+                    "files": [
+                        {
+                            "source": {
+                                "type": "file_id",
+                                "file_id": input_file_id,
+                            }
+                        }
+                    ],
+                    "tier": tier,
+                    "ocr_mode": ocr_mode,
+                    "output_formats": ["zip"],
+                },
+            ),
+            "创建解析任务",
+        )
+        job_id = job.get("job_id")
+        if not isinstance(job_id, str) or not job_id:
+            raise RuntimeError("MinerU v1 返回了无效 job id")
+
+        deadline = time.monotonic() + TASK_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            job = _v1_response_json(
+                client.get(f"{base_url}/v1/parse/jobs/{job_id}"),
+                "查询解析任务",
+            )
+            status = job.get("status")
+            if status in {"queued", "running"}:
+                time.sleep(poll_interval)
+                continue
+            if status in {"completed", "partial"}:
+                break
+            raise RuntimeError(f"MinerU v1 解析任务未完成：{status}")
+        else:
+            raise RuntimeError("等待 MinerU v1 解析任务超时")
+
+        files = job.get("files")
+        first_file = files[0] if isinstance(files, list) and files else None
+        output_files = (
+            first_file.get("output_files")
+            if isinstance(first_file, dict)
+            else None
+        )
+        zip_ref = output_files.get("zip") if isinstance(output_files, dict) else None
+        output_file_id = zip_ref.get("file_id") if isinstance(zip_ref, dict) else None
+        if not isinstance(output_file_id, str) or not output_file_id:
+            raise RuntimeError("MinerU v1 结果缺少 ZIP")
+
+        response = client.get(f"{base_url}/v1/files/{output_file_id}/content")
+        if response.status_code != 200:
+            raise RuntimeError(
+                "下载 MinerU v1 结果失败："
+                f"HTTP {response.status_code}"
+            )
+        if not is_zipfile(io.BytesIO(response.content)):
+            raise RuntimeError("MinerU v1 结果不是 ZIP")
+        return response.content
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"调用 MinerU v1 失败：{exc}") from exc
+    finally:
+        cleanup_file_ids = [output_file_id]
+        if remove_input_file:
+            cleanup_file_ids.append(input_file_id)
+        for file_id in cleanup_file_ids:
+            if not file_id:
+                continue
+            try:
+                client.delete(f"{base_url}/v1/files/{file_id}")
+            except httpx.HTTPError:
+                logger.warning("Could not remove temporary MinerU file")
+
+
 def _run_task(
     input_path: Path,
     *,
@@ -216,78 +566,29 @@ def _run_task(
 
     owns_client = client is None
     http_client = client or httpx.Client(
-        timeout=httpx.Timeout(connect=10.0, read=60.0, write=60.0, pool=10.0),
+        timeout=httpx.Timeout(connect=10.0, read=120.0, write=120.0, pool=10.0),
         follow_redirects=True,
     )
     try:
-        request_form = {**form, "backend": backend}
-        if server_url:
-            request_form["server_url"] = server_url.rstrip("/")
-        content_type = mimetypes.guess_type(input_path.name)[0] or (
-            "application/octet-stream"
-        )
-
         try:
-            with input_path.open("rb") as input_file:
-                response = http_client.post(
-                    f"{svr_url.rstrip('/')}/tasks",
-                    data=request_form,
-                    files={
-                        "files": (input_path.name, input_file, content_type)
-                    },
-                )
-        except (OSError, httpx.HTTPError) as exc:
-            raise RuntimeError(f"提交 MinerU 任务失败：{exc}") from exc
-        if response.status_code != 202:
-            raise RuntimeError(
-                f"提交 MinerU 任务失败：HTTP {response.status_code} {response.text}"
+            return _run_legacy_task(
+                input_path,
+                form=form,
+                svr_url=svr_url,
+                backend=backend,
+                server_url=server_url,
+                client=http_client,
+                poll_interval=poll_interval,
             )
-
-        submission = _response_json(response, "任务提交")
-        task_id = submission.get("task_id")
-        status_url = submission.get("status_url")
-        result_url = submission.get("result_url")
-        if not all(
-            isinstance(value, str) and value
-            for value in (task_id, status_url, result_url)
-        ):
-            raise RuntimeError("MinerU 返回了无效任务响应")
-
-        deadline = time.monotonic() + TASK_TIMEOUT_SECONDS
-        while time.monotonic() < deadline:
-            try:
-                response = http_client.get(status_url)
-            except httpx.HTTPError as exc:
-                raise RuntimeError(f"查询 MinerU 任务失败：{exc}") from exc
-            if response.status_code != 200:
-                raise RuntimeError(
-                    f"查询 MinerU 任务失败：HTTP {response.status_code} {response.text}"
-                )
-
-            status_payload = _response_json(response, "任务状态")
-            status = status_payload.get("status")
-            if status in {"pending", "processing"}:
-                time.sleep(poll_interval)
-                continue
-            if status == "completed":
-                break
-            if status == "failed":
-                raise RuntimeError(f"MinerU 任务失败：{status_payload}")
-            raise RuntimeError(f"MinerU 返回未知任务状态：{status!r}")
-        else:
-            raise RuntimeError("等待 MinerU 任务超时")
-
-        try:
-            response = http_client.get(result_url)
-        except httpx.HTTPError as exc:
-            raise RuntimeError(f"下载 MinerU 结果失败：{exc}") from exc
-        if response.status_code != 200:
-            raise RuntimeError(
-                f"下载 MinerU 结果失败：HTTP {response.status_code} {response.text}"
+        except _LegacyEndpointUnavailable:
+            return _run_v1_task(
+                input_path,
+                form=form,
+                svr_url=svr_url,
+                backend=backend,
+                client=http_client,
+                poll_interval=poll_interval,
             )
-        if "application/zip" not in response.headers.get("content-type", "").lower():
-            raise RuntimeError("MinerU 结果不是 ZIP")
-        return response.content
     finally:
         if owns_client:
             http_client.close()

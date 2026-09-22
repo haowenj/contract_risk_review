@@ -4,11 +4,9 @@ import json
 from pathlib import Path
 
 import pytest
-import httpx
 
 from app.evidence_review.rule_import import (
     RuleDocumentExtractor,
-    run_rule_parse,
     validate_rule_upload,
 )
 
@@ -98,102 +96,3 @@ def test_pdf_parser_failure_is_propagated(tmp_path: Path):
 
     with pytest.raises(RuntimeError, match="mineru unavailable"):
         extractor.extract(upload, tmp_path / "managed")
-
-
-def test_rule_parser_falls_back_to_mineru_v1_structured_content(tmp_path: Path):
-    calls = []
-    poll_count = 0
-
-    def legacy_parser(*args, **kwargs):
-        raise RuntimeError('提交 MinerU 任务失败：HTTP 404 {"detail":"Not Found"}')
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal poll_count
-        calls.append((request.method, request.url.path))
-        if request.method == "POST" and request.url.path == "/v1/uploads":
-            return httpx.Response(
-                200,
-                json={
-                    "id": "upload-1",
-                    "upload_url": "http://mineru.test/v1/uploads/upload-1/content",
-                    "upload_headers": {"content-type": "application/octet-stream"},
-                },
-            )
-        if request.method == "PUT" and request.url.path.endswith("/content"):
-            return httpx.Response(200, json={})
-        if request.method == "POST" and request.url.path.endswith("/complete"):
-            return httpx.Response(200, json={"file": {"id": "file-input"}})
-        if request.method == "POST" and request.url.path == "/v1/parse/jobs":
-            body = json.loads(request.content)
-            assert body["output_formats"] == ["structured_content"]
-            assert body["tier"] == "standard"
-            return httpx.Response(202, json={"job_id": "job-1"})
-        if request.method == "GET" and request.url.path == "/v1/parse/jobs/job-1":
-            poll_count += 1
-            if poll_count == 1:
-                return httpx.Response(200, json={"status": "running"})
-            return httpx.Response(
-                200,
-                json={
-                    "status": "completed",
-                    "files": [
-                        {
-                            "status": "completed",
-                            "output_files": {
-                                "structured_content": {
-                                    "file_id": "file-output",
-                                    "bytes": 10,
-                                }
-                            },
-                        }
-                    ],
-                },
-            )
-        if request.method == "GET" and request.url.path == "/v1/files/file-output/content":
-            return httpx.Response(
-                200,
-                json={
-                    "pages": [
-                        {
-                            "page_idx": 0,
-                            "blocks": [
-                                {"type": "paragraph_title", "content": "一、阶段"},
-                                {"type": "text", "content": "1. 检查项"},
-                            ],
-                        },
-                        {
-                            "page_idx": 1,
-                            "blocks": [
-                                {"type": "text", "content": "2. 第二项"}
-                            ],
-                        },
-                    ]
-                },
-            )
-        if request.method == "DELETE" and request.url.path.startswith("/v1/files/"):
-            return httpx.Response(200, json={})
-        return httpx.Response(404)
-
-    source = tmp_path / "rules.pdf"
-    output = tmp_path / "raw.json"
-    source.write_bytes(b"%PDF-test")
-    client = httpx.Client(transport=httpx.MockTransport(handler))
-
-    run_rule_parse(
-        source,
-        output,
-        svr_url="http://mineru.test",
-        backend="hybrid-engine",
-        server_url=None,
-        legacy_parser=legacy_parser,
-        client=client,
-        poll_interval=0,
-    )
-    client.close()
-
-    assert json.loads(output.read_text(encoding="utf-8")) == [
-        {"page_idx": 0, "type": "text", "text": "一、阶段"},
-        {"page_idx": 0, "type": "text", "text": "1. 检查项"},
-        {"page_idx": 1, "type": "text", "text": "2. 第二项"},
-    ]
-    assert ("POST", "/v1/uploads") in calls

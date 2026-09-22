@@ -5,21 +5,19 @@ import json
 import logging
 import os
 import re
-import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-import httpx
 from langchain_openai import ChatOpenAI
-from mineru_raw_parse import run_parse
 
 from app.evidence_review.repository import (
     EvidenceReviewRepository,
     RuleSetRecord,
 )
 from app.evidence_review.schemas import RuleParseResult
-
+from mineru_raw_parse import run_parse
 
 LOGGER = logging.getLogger(__name__)
 RULE_PARSE_TIMEOUT_SECONDS = float(
@@ -83,246 +81,7 @@ def validate_rule_upload(
 Parser = Callable[..., None]
 
 
-def _v1_response_json(response: httpx.Response, label: str) -> dict[str, Any]:
-    if response.status_code not in {200, 202}:
-        raise RuntimeError(
-            f"MinerU v1 {label}失败：HTTP {response.status_code}"
-        )
-    try:
-        payload = response.json()
-    except ValueError as exc:
-        raise RuntimeError(f"MinerU v1 {label}响应不是有效 JSON") from exc
-    if not isinstance(payload, dict):
-        raise RuntimeError(f"MinerU v1 {label}响应必须是 JSON 对象")
-    return payload
-
-
-def _run_v1_rule_parse(
-    source_path: Path,
-    output_path: Path,
-    *,
-    svr_url: str,
-    backend: str,
-    client: httpx.Client | None = None,
-    poll_interval: float = 2.0,
-) -> None:
-    """Parse a rule PDF through MinerU 4.x and flatten page text blocks."""
-    owns_client = client is None
-    http_client = client or httpx.Client(
-        timeout=httpx.Timeout(connect=10.0, read=120.0, write=120.0, pool=10.0),
-        follow_redirects=True,
-    )
-    base_url = svr_url.rstrip("/")
-    input_file_id: str | None = None
-    output_file_id: str | None = None
-    remove_input_file = False
-    try:
-        content = source_path.read_bytes()
-        digest = hashlib.sha256(content).hexdigest()
-        upload = _v1_response_json(
-            http_client.post(
-                f"{base_url}/v1/uploads",
-                json={
-                    "filename": source_path.name,
-                    "bytes": len(content),
-                    "mime_type": "application/pdf",
-                    "purpose": "parse",
-                    "sha256sum": digest,
-                },
-            ),
-            "创建上传",
-        )
-        upload_id = upload.get("id")
-        if not isinstance(upload_id, str) or not upload_id:
-            raise RuntimeError("MinerU v1 返回了无效 upload id")
-        file_payload = upload.get("file")
-        if upload.get("status") != "completed" or not isinstance(
-            file_payload, dict
-        ):
-            upload_url = upload.get("upload_url")
-            if not isinstance(upload_url, str) or not upload_url:
-                upload_url = f"{base_url}/v1/uploads/{upload_id}/content"
-            elif upload_url.startswith("/"):
-                upload_url = f"{base_url}{upload_url}"
-            headers = upload.get("upload_headers")
-            if not isinstance(headers, dict):
-                headers = {"content-type": "application/octet-stream"}
-            upload_response = http_client.put(
-                upload_url,
-                headers={
-                    str(key): str(value) for key, value in headers.items()
-                },
-                content=content,
-            )
-            if upload_response.status_code != 200:
-                raise RuntimeError(
-                    "MinerU v1 上传内容失败："
-                    f"HTTP {upload_response.status_code}"
-                )
-            completed = _v1_response_json(
-                http_client.post(
-                    f"{base_url}/v1/uploads/{upload_id}/complete",
-                    json={"sha256sum": digest},
-                ),
-                "完成上传",
-            )
-            file_payload = completed.get("file")
-            remove_input_file = True
-        input_file_id = (
-            file_payload.get("id")
-            if isinstance(file_payload, dict)
-            else None
-        )
-        if not isinstance(input_file_id, str) or not input_file_id:
-            raise RuntimeError("MinerU v1 返回了无效 input file id")
-
-        tier = "basic" if backend == "pipeline" else "standard"
-        job = _v1_response_json(
-            http_client.post(
-                f"{base_url}/v1/parse/jobs",
-                json={
-                    "files": [
-                        {
-                            "source": {
-                                "type": "file_id",
-                                "file_id": input_file_id,
-                            }
-                        }
-                    ],
-                    "tier": tier,
-                    "ocr_mode": "auto",
-                    "output_formats": ["structured_content"],
-                },
-            ),
-            "创建解析任务",
-        )
-        job_id = job.get("job_id")
-        if not isinstance(job_id, str) or not job_id:
-            raise RuntimeError("MinerU v1 返回了无效 job id")
-
-        deadline = time.monotonic() + 30 * 60
-        while time.monotonic() < deadline:
-            job = _v1_response_json(
-                http_client.get(f"{base_url}/v1/parse/jobs/{job_id}"),
-                "查询解析任务",
-            )
-            status = job.get("status")
-            if status in {"queued", "running"}:
-                time.sleep(poll_interval)
-                continue
-            if status in {"completed", "partial"}:
-                break
-            raise RuntimeError(f"MinerU v1 解析任务未完成：{status}")
-        else:
-            raise RuntimeError("等待 MinerU v1 解析任务超时")
-
-        files = job.get("files")
-        first_file = files[0] if isinstance(files, list) and files else None
-        output_files = (
-            first_file.get("output_files")
-            if isinstance(first_file, dict)
-            else None
-        )
-        structured_ref = (
-            output_files.get("structured_content")
-            if isinstance(output_files, dict)
-            else None
-        )
-        output_file_id = (
-            structured_ref.get("file_id")
-            if isinstance(structured_ref, dict)
-            else None
-        )
-        if not isinstance(output_file_id, str) or not output_file_id:
-            raise RuntimeError("MinerU v1 结果缺少 structured_content")
-        structured = _v1_response_json(
-            http_client.get(
-                f"{base_url}/v1/files/{output_file_id}/content"
-            ),
-            "下载结构化结果",
-        )
-        pages = structured.get("pages")
-        if not isinstance(pages, list):
-            raise RuntimeError("MinerU v1 structured_content 缺少 pages")
-        flattened: list[dict[str, Any]] = []
-        for fallback_idx, page in enumerate(pages):
-            if not isinstance(page, dict):
-                continue
-            page_idx = page.get("page_idx")
-            if not isinstance(page_idx, int):
-                page_idx = fallback_idx
-            blocks = page.get("blocks")
-            if not isinstance(blocks, list):
-                continue
-            for block in blocks:
-                if not isinstance(block, dict):
-                    continue
-                block_content = block.get("content")
-                if not isinstance(block_content, str) or not block_content.strip():
-                    continue
-                flattened.append(
-                    {
-                        "page_idx": page_idx,
-                        "type": "text",
-                        "text": block_content.strip(),
-                    }
-                )
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(
-            json.dumps(flattened, ensure_ascii=False),
-            encoding="utf-8",
-        )
-    finally:
-        cleanup_file_ids = [output_file_id]
-        if remove_input_file:
-            cleanup_file_ids.append(input_file_id)
-        for file_id in cleanup_file_ids:
-            if file_id:
-                try:
-                    http_client.delete(f"{base_url}/v1/files/{file_id}")
-                except httpx.HTTPError:
-                    LOGGER.warning("Could not remove temporary MinerU file")
-        if owns_client:
-            http_client.close()
-
-
-def run_rule_parse(
-    source_path: Path,
-    output_path: Path,
-    *,
-    svr_url: str,
-    backend: str,
-    server_url: str | None,
-    legacy_parser: Parser = run_parse,
-    client: httpx.Client | None = None,
-    poll_interval: float = 2.0,
-) -> None:
-    try:
-        legacy_parser(
-            source_path,
-            output_path,
-            svr_url=svr_url,
-            backend=backend,
-            server_url=server_url,
-            **(
-                {"client": client, "poll_interval": poll_interval}
-                if client is not None
-                else {}
-            ),
-        )
-        return
-    except RuntimeError as exc:
-        if "HTTP 404" not in str(exc):
-            raise
-        LOGGER.info("Legacy MinerU API unavailable; falling back to v1")
-    _run_v1_rule_parse(
-        source_path,
-        output_path,
-        svr_url=svr_url,
-        backend=backend,
-        client=client,
-        poll_interval=poll_interval,
-    )
+run_rule_parse = run_parse
 
 
 class RuleDocumentExtractor:
