@@ -195,6 +195,120 @@ def test_import_supports_three_section_levels_and_keeps_parent_nodes_out_of_item
     }
 
 
+def test_import_normalizes_nested_section_items_from_schema_weak_models(
+    tmp_path: Path,
+):
+    nested_item = make_item(
+        item_id="stage-one-item-5-3",
+        source_number="5.3",
+        name="主体信息核验",
+        section_path=["投标立项审查"],
+    )
+    payload = {
+        "document_title": "动态负面清单",
+        "sections": [
+            {
+                "section_id": "stage-one",
+                "source_number": "一、",
+                "section_title": "投标立项审查",
+                "parent_section_id": None,
+                "review_items": [nested_item],
+            }
+        ],
+    }
+    _, service, rule_set_id = build_import_service(tmp_path, payload)
+
+    imported = service.import_rule_set(rule_set_id)
+
+    assert imported.status == "draft"
+    assert imported.parsed_rules["sections"] == [
+        {
+            "section_id": "stage-one",
+            "source_number": "一、",
+            "title": "投标立项审查",
+            "parent_section_id": None,
+            "level": 1,
+            "source_pages": [1],
+        }
+    ]
+    assert len(imported.parsed_rules["review_items"]) == 1
+    assert imported.parsed_rules["review_items"][0]["source_number"] == (
+        "一-5.3"
+    )
+
+
+def test_import_expands_schema_weak_item_shorthand_before_strict_validation(
+    tmp_path: Path,
+):
+    payload = {
+        "document_title": "动态负面清单",
+        "sections": [
+            {
+                "section_id": "stage-one",
+                "source_number": "一、",
+                "title": "投标立项审查",
+                "parent_section_id": None,
+                "level": 1,
+                "source_pages": [1],
+            }
+        ],
+        "review_items": [
+            {
+                "item_id": "stage-one-item-5-3",
+                "source_number": "一-5.3",
+                "rule_text": "核验交易主体的公开信用信息",
+                "source_pages": [1],
+                "risk_type": "review_check",
+                "evidence_scope": "hybrid",
+                "retrieval_queries": ["合同相对方名称和统一社会信用代码"],
+                "fact_requirements": [
+                    "合同相对方名称",
+                    "统一社会信用代码",
+                ],
+                "research_requirements": [
+                    "查询交易主体的登记及公开信用信息"
+                ],
+            }
+        ],
+    }
+    _, service, rule_set_id = build_import_service(tmp_path, payload)
+
+    imported = service.import_rule_set(rule_set_id)
+
+    assert imported.status == "draft"
+    item = imported.parsed_rules["review_items"][0]
+    assert item["section_path"] == ["投标立项审查"]
+    assert item["name"] == "核验交易主体的公开信用信息"
+    assert item["item_kind"] == "review_check"
+    assert item["decision_mode"] == "query_and_compare"
+    assert item["fact_requirements"] == [
+        {
+            "fact_key": "fact_1_合同相对方名称",
+            "label": "合同相对方名称",
+            "value_type": "string",
+            "required": True,
+        },
+        {
+            "fact_key": "fact_2_统一社会信用代码",
+            "label": "统一社会信用代码",
+            "value_type": "string",
+            "required": True,
+        },
+    ]
+    assert item["research_requirements"] == [
+        {
+            "source_type": "public_query",
+            "target_type": "外部查询对象",
+            "required_fact_keys": [
+                "fact_1_合同相对方名称",
+                "fact_2_统一社会信用代码",
+            ],
+            "query_topics": ["查询交易主体的登记及公开信用信息"],
+            "comparison_points": ["核验交易主体的公开信用信息"],
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -259,6 +373,7 @@ def test_build_llm_uses_strict_rule_parse_json_schema():
     schema = response_format["json_schema"]["schema"]
     assert schema["title"] == "RuleParseResult"
     assert factory.call_args.kwargs["temperature"] == 0
+    assert factory.call_args.kwargs["timeout"] == 300.0
     assert factory.call_args.kwargs["max_retries"] == 0
     assert factory.call_args.kwargs["reasoning_effort"] == "none"
 

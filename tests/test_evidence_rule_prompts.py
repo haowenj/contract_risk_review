@@ -21,6 +21,11 @@ def test_rule_parse_prompt_requires_generic_structure_discovery():
     assert "父级目录" in prompt
     assert "叶子" in prompt
     assert "process_control" in prompt
+    assert "review_items 必须是顶层数组" in prompt
+    assert "不得嵌套在 sections" in prompt
+    assert "完整编号路径" in prompt
+    assert "查询标识" in prompt
+    assert "企业全称" in prompt
     assert "一、商务条件" in prompt
     assert "未编号的风险描述" in prompt
 
