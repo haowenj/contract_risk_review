@@ -11,12 +11,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from app.evidence_review.schemas import HumanDecision
+
 
 class RuleSetTransitionError(RuntimeError):
     pass
 
 
 class EvidenceRunTransitionError(RuntimeError):
+    pass
+
+
+class DecisionConflictError(RuntimeError):
     pass
 
 
@@ -59,6 +65,14 @@ class EvidenceReviewItemRecord:
     rule_snapshot: dict[str, Any]
     evidence_package: dict[str, Any]
     created_at: str
+
+
+@dataclass(frozen=True)
+class EvidenceReviewDecisionRecord:
+    run_id: str
+    rule_item_id: str
+    decision: HumanDecision
+    updated_at: str
 
 
 class EvidenceReviewRepository:
@@ -147,6 +161,17 @@ class EvidenceReviewRepository:
 
                 CREATE INDEX IF NOT EXISTS idx_evidence_review_items_order
                     ON evidence_review_items(run_id, ordinal);
+
+                CREATE TABLE IF NOT EXISTS evidence_review_decisions (
+                    run_id TEXT NOT NULL,
+                    rule_item_id TEXT NOT NULL,
+                    decision_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (run_id, rule_item_id),
+                    FOREIGN KEY (run_id, rule_item_id)
+                        REFERENCES evidence_review_items(run_id, rule_item_id)
+                        ON DELETE CASCADE
+                );
                 """
             )
 
@@ -204,6 +229,19 @@ class EvidenceReviewRepository:
             rule_snapshot=json.loads(row["rule_snapshot_json"]),
             evidence_package=json.loads(row["evidence_package_json"]),
             created_at=row["created_at"],
+        )
+
+    @staticmethod
+    def _decision_from_row(
+        row: sqlite3.Row | None,
+    ) -> EvidenceReviewDecisionRecord | None:
+        if row is None:
+            return None
+        return EvidenceReviewDecisionRecord(
+            run_id=row["run_id"],
+            rule_item_id=row["rule_item_id"],
+            decision=HumanDecision.model_validate_json(row["decision_json"]),
+            updated_at=row["updated_at"],
         )
 
     def create_rule_set(
@@ -472,6 +510,35 @@ class EvidenceReviewRepository:
                         timestamp,
                     ),
                 )
+                raw_package = value["evidence_package"]
+                research_package = raw_package.get("research_package")
+                research_status = (
+                    research_package.get("research_status", "pending")
+                    if isinstance(research_package, dict)
+                    else "not_required"
+                )
+                initial_decision = HumanDecision(
+                    human_review_status="pending",
+                    decision=None,
+                    risk_level=None,
+                    opinion="",
+                    research_status=research_status,
+                    research_notes="",
+                    updated_at=timestamp,
+                )
+                connection.execute(
+                    """
+                    INSERT INTO evidence_review_decisions (
+                        run_id, rule_item_id, decision_json, updated_at
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        item_ids[ordinal],
+                        initial_decision.model_dump_json(),
+                        timestamp,
+                    ),
+                )
             cursor = connection.execute(
                 """
                 UPDATE evidence_review_runs
@@ -502,6 +569,118 @@ class EvidenceReviewRepository:
                 (run_id,),
             ).fetchall()
         return [self._evidence_item_from_row(row) for row in rows]
+
+    def get_evidence_decision(
+        self,
+        run_id: str,
+        rule_item_id: str,
+    ) -> EvidenceReviewDecisionRecord | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM evidence_review_decisions
+                WHERE run_id = ? AND rule_item_id = ?
+                """,
+                (run_id, rule_item_id),
+            ).fetchone()
+        return self._decision_from_row(row)
+
+    def list_evidence_decisions(
+        self,
+        run_id: str,
+    ) -> list[EvidenceReviewDecisionRecord]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT decision.*
+                FROM evidence_review_decisions AS decision
+                JOIN evidence_review_items AS item
+                  ON item.run_id = decision.run_id
+                 AND item.rule_item_id = decision.rule_item_id
+                WHERE decision.run_id = ?
+                ORDER BY item.ordinal
+                """,
+                (run_id,),
+            ).fetchall()
+        return [
+            value
+            for row in rows
+            if (value := self._decision_from_row(row)) is not None
+        ]
+
+    def save_evidence_decision(
+        self,
+        run_id: str,
+        rule_item_id: str,
+        decision: HumanDecision,
+        expected_updated_at: str,
+    ) -> EvidenceReviewDecisionRecord:
+        updated_at = decision.updated_at.isoformat()
+        with self._write_lock, self._connection() as connection:
+            run = connection.execute(
+                "SELECT status FROM evidence_review_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if run is None:
+                raise KeyError(run_id)
+            if run["status"] != "ready":
+                raise EvidenceRunTransitionError(run_id)
+            cursor = connection.execute(
+                """
+                UPDATE evidence_review_decisions
+                SET decision_json = ?, updated_at = ?
+                WHERE run_id = ? AND rule_item_id = ? AND updated_at = ?
+                """,
+                (
+                    decision.model_dump_json(),
+                    updated_at,
+                    run_id,
+                    rule_item_id,
+                    expected_updated_at,
+                ),
+            )
+            if cursor.rowcount != 1:
+                existing = connection.execute(
+                    """
+                    SELECT 1 FROM evidence_review_decisions
+                    WHERE run_id = ? AND rule_item_id = ?
+                    """,
+                    (run_id, rule_item_id),
+                ).fetchone()
+                if existing is None:
+                    raise KeyError(rule_item_id)
+                raise DecisionConflictError(rule_item_id)
+
+            rows = connection.execute(
+                """
+                SELECT decision_json FROM evidence_review_decisions
+                WHERE run_id = ?
+                """,
+                (run_id,),
+            ).fetchall()
+            completed = sum(
+                HumanDecision.model_validate_json(row["decision_json"])
+                .human_review_status
+                == "completed"
+                for row in rows
+            )
+            if completed == 0:
+                human_status = "pending"
+            elif completed == len(rows):
+                human_status = "completed"
+            else:
+                human_status = "in_progress"
+            connection.execute(
+                """
+                UPDATE evidence_review_runs SET human_status = ?
+                WHERE run_id = ?
+                """,
+                (human_status, run_id),
+            )
+        return self.get_evidence_decision(  # type: ignore[return-value]
+            run_id,
+            rule_item_id,
+        )
 
     def mark_evidence_run_failed(
         self,

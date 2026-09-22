@@ -272,7 +272,7 @@ def test_ready_page_displays_evidence_facts_missing_sources_and_research(
         "未找到不等于合同没有约定，请人工核对全文及附件",
     ]:
         assert text in response.text
-    for forbidden in ["risk_status", "risk_level", "风险说明", "修改建议"]:
+    for forbidden in ["risk_status", "风险说明", "修改建议"]:
         assert forbidden not in response.text
     assert 'id="evidence-status-filter"' in response.text
     assert 'id="research-status-filter"' in response.text
@@ -333,3 +333,87 @@ def test_processing_page_contains_polling_endpoint(tmp_path: Path):
     assert response.status_code == 200
     assert f"/api/contracts/c1/evidence-review/runs/{run.run_id}" in response.text
     assert "正在提取合同证据" in response.text
+
+
+def test_decision_form_saves_and_redirects_to_item_anchor(tmp_path: Path):
+    client, _, rule_set = build_client(tmp_path)
+    created = client.post(
+        "/contracts/c1/evidence-review/runs",
+        data={"rule_set_id": rule_set.rule_set_id},
+        follow_redirects=False,
+    )
+    run_id = parse_qs(urlparse(created.headers["location"]).query)["run_id"][0]
+    payload = client.get(
+        f"/api/contracts/c1/evidence-review/runs/{run_id}"
+    ).json()
+    decision = payload["items"][0]["human_decision"]
+
+    response = client.post(
+        f"/contracts/c1/evidence-review/runs/{run_id}/items/found/decision",
+        data={
+            "decision": "cannot_determine",
+            "risk_level": "",
+            "opinion": "等待企业查询结果后再判断",
+            "research_status": "pending",
+            "research_notes": "尚未完成公开查询",
+            "expected_updated_at": decision["updated_at"],
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == (
+        f"/contracts/c1/evidence-review?run_id={run_id}#item-found"
+    )
+    saved = client.get(
+        f"/api/contracts/c1/evidence-review/runs/{run_id}"
+    ).json()["items"][0]["human_decision"]
+    assert saved["decision"] == "cannot_determine"
+    assert saved["opinion"] == "等待企业查询结果后再判断"
+
+
+def test_invalid_decision_preserves_input_and_stale_route_returns_409(
+    tmp_path: Path,
+):
+    client, _, rule_set = build_client(tmp_path)
+    created = client.post(
+        "/contracts/c1/evidence-review/runs",
+        data={"rule_set_id": rule_set.rule_set_id},
+        follow_redirects=False,
+    )
+    run_id = parse_qs(urlparse(created.headers["location"]).query)["run_id"][0]
+    endpoint = (
+        f"/contracts/c1/evidence-review/runs/{run_id}"
+        "/items/found/decision"
+    )
+    initial = client.get(
+        f"/api/contracts/c1/evidence-review/runs/{run_id}"
+    ).json()["items"][0]["human_decision"]
+
+    invalid = client.post(
+        endpoint,
+        data={
+            "decision": "risk",
+            "risk_level": "high",
+            "opinion": "这段输入必须保留",
+            "research_status": "pending",
+            "research_notes": "尚未查询",
+            "expected_updated_at": initial["updated_at"],
+        },
+    )
+    assert invalid.status_code == 400
+    assert "这段输入必须保留" in invalid.text
+    assert "外部或内部查询尚未完成" in invalid.text
+
+    valid_data = {
+        "decision": "cannot_determine",
+        "risk_level": "",
+        "opinion": "暂无法判断",
+        "research_status": "pending",
+        "research_notes": "等待查询",
+        "expected_updated_at": initial["updated_at"],
+    }
+    assert client.post(endpoint, data=valid_data).status_code == 200
+    stale = client.post(endpoint, data=valid_data)
+    assert stale.status_code == 409
+    assert "页面数据已更新" in stale.text

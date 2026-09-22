@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
 from app.evidence_review.repository import (
     EvidenceReviewRepository,
+    EvidenceReviewDecisionRecord,
     EvidenceReviewRunRecord,
     EvidenceRunTransitionError,
 )
-from app.evidence_review.schemas import EvidencePackage, RuleItem
+from app.evidence_review.schemas import EvidencePackage, HumanDecision, RuleItem
 from app.evidence_review.service import (
     EvidenceReviewService,
     build_fact_extraction_llm,
@@ -175,6 +177,24 @@ class EvidenceReviewWebService:
         if run is None or run.contract_id != contract_id:
             raise KeyError(run_id)
         items = self.repository.list_evidence_items(run_id)
+        decisions = {
+            value.rule_item_id: value
+            for value in self.repository.list_evidence_decisions(run_id)
+        }
+        completed_decisions = [
+            value.decision
+            for value in decisions.values()
+            if value.decision.human_review_status == "completed"
+        ]
+
+        def decision_payload(item_id: str) -> dict[str, Any]:
+            record = decisions[item_id]
+            payload = record.decision.model_dump(mode="json")
+            # Keep the exact compare-and-swap token stored by SQLite. Pydantic
+            # may otherwise render UTC as ``Z`` instead of ``+00:00``.
+            payload["updated_at"] = record.updated_at
+            return payload
+
         return {
             "run_id": run.run_id,
             "contract_id": run.contract_id,
@@ -191,14 +211,52 @@ class EvidenceReviewWebService:
                     "evidence_package": EvidencePackage.model_validate(
                         item.evidence_package
                     ).model_dump(mode="json"),
+                    "human_decision": decision_payload(item.rule_item_id),
                 }
                 for item in items
             ],
+            "human_summary": {
+                "pending_count": len(items) - len(completed_decisions),
+                "completed_count": len(completed_decisions),
+                "risk_count": sum(
+                    value.decision == "risk"
+                    for value in completed_decisions
+                ),
+                "no_obvious_risk_count": sum(
+                    value.decision == "no_obvious_risk"
+                    for value in completed_decisions
+                ),
+                "cannot_determine_count": sum(
+                    value.decision == "cannot_determine"
+                    for value in completed_decisions
+                ),
+            },
             "created_at": run.created_at,
             "started_at": run.started_at,
             "completed_at": run.completed_at,
             "error_message": run.error_message,
         }
+
+    def save_human_decision(
+        self,
+        run_id: str,
+        item_id: str,
+        decision: HumanDecision | dict[str, Any],
+        expected_updated_at: str,
+    ) -> EvidenceReviewDecisionRecord:
+        raw = (
+            decision.model_dump(mode="json")
+            if isinstance(decision, HumanDecision)
+            else dict(decision)
+        )
+        raw["updated_at"] = datetime.now(UTC)
+        validated = HumanDecision.model_validate(raw)
+        return self.repository.save_evidence_decision(
+            run_id,
+            item_id,
+            validated,
+            expected_updated_at,
+        )
 
     def recover_interrupted_runs(self) -> int:
         return self.repository.recover_incomplete_evidence_runs(

@@ -33,6 +33,7 @@ from app.evaluation_service import (
     EvaluationStaleError,
 )
 from app.evidence_review.repository import (
+    DecisionConflictError,
     EvidenceReviewRepository,
     RuleSetRecord,
     RuleSetTransitionError,
@@ -206,6 +207,8 @@ def create_app(
         run_id: str | None = None,
         error: str | None = None,
         status_code: int = 200,
+        decision_item_id: str | None = None,
+        decision_input: dict[str, str] | None = None,
     ) -> HTMLResponse:
         contract = active_service.get_contract(contract_id)
         if contract is None:
@@ -244,6 +247,8 @@ def create_app(
                 "run": run_payload,
                 "run_id": run_id,
                 "error": error,
+                "decision_item_id": decision_item_id,
+                "decision_input": decision_input or {},
             },
         )
 
@@ -766,6 +771,97 @@ def create_app(
             url=(
                 f"/contracts/{contract_id}/evidence-review"
                 f"?run_id={run.run_id}"
+            ),
+            status_code=303,
+        )
+
+    @application.post(
+        "/contracts/{contract_id}/evidence-review/runs/{run_id}"
+        "/items/{item_id}/decision",
+        response_class=HTMLResponse,
+    )
+    def save_evidence_review_decision(
+        request: Request,
+        contract_id: str,
+        run_id: str,
+        item_id: str,
+        decision: str = Form(default=""),
+        risk_level: str = Form(default=""),
+        opinion: str = Form(default=""),
+        research_status: str = Form(...),
+        research_notes: str = Form(default=""),
+        expected_updated_at: str = Form(...),
+    ) -> Response:
+        submitted = {
+            "decision": decision,
+            "risk_level": risk_level,
+            "opinion": opinion,
+            "research_status": research_status,
+            "research_notes": research_notes,
+            "expected_updated_at": expected_updated_at,
+        }
+        try:
+            active_evidence_review_web_service.get_run_payload(
+                contract_id,
+                run_id,
+            )
+            active_evidence_review_web_service.save_human_decision(
+                run_id,
+                item_id,
+                {
+                    "human_review_status": (
+                        "completed" if decision else "pending"
+                    ),
+                    "decision": decision or None,
+                    "risk_level": risk_level or None,
+                    "opinion": opinion,
+                    "research_status": research_status,
+                    "research_notes": research_notes,
+                },
+                expected_updated_at,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail="evidence review item not found",
+            ) from exc
+        except DecisionConflictError:
+            return render_evidence_review_page(
+                request,
+                contract_id,
+                run_id=run_id,
+                error="页面数据已更新，请核对最新内容后重新提交。",
+                status_code=409,
+                decision_item_id=item_id,
+                decision_input=submitted,
+            )
+        except ValueError as exc:
+            message = str(exc)
+            if "pending research" in message:
+                public_message = (
+                    "外部或内部查询尚未完成，只能选择“暂无法判断”"
+                    "或继续待审核。"
+                )
+            elif "opinion" in message:
+                public_message = "完成人工判断时必须填写人工意见。"
+            elif "risk_level" in message:
+                public_message = "只有“有风险”结论可以填写风险等级。"
+            else:
+                public_message = "人工判断内容不完整，请检查后重试。"
+            return render_evidence_review_page(
+                request,
+                contract_id,
+                run_id=run_id,
+                error=public_message,
+                status_code=400,
+                decision_item_id=item_id,
+                decision_input=submitted,
+            )
+
+        return RedirectResponse(
+            url=(
+                f"/contracts/{contract_id}/evidence-review"
+                f"?run_id={run_id}#item-{item_id}"
             ),
             status_code=303,
         )
