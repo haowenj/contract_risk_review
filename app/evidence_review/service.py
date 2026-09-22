@@ -127,11 +127,13 @@ class EvidenceReviewService:
     def extract_item(self, contract_id: str, item: RuleItem) -> EvidencePackage:
         try:
             return self._extract_item(contract_id, item)
-        except Exception:
-            LOGGER.exception(
-                "Evidence extraction failed for contract=%s item=%s",
+        except Exception as exc:
+            LOGGER.error(
+                "Evidence extraction failed for contract=%s item=%s "
+                "(error_type=%s)",
                 contract_id,
                 item.item_id,
+                type(exc).__name__,
             )
             return EvidencePackage(
                 rule_item_id=item.item_id,

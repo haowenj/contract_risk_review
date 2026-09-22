@@ -789,8 +789,12 @@ class RuleSetImportService:
                 rule_set_id,
                 parsed_json,
             )
-        except Exception:
-            LOGGER.exception("Rule-set import failed for %s", rule_set_id)
+        except Exception as exc:
+            LOGGER.error(
+                "Rule-set import failed for %s (error_type=%s)",
+                rule_set_id,
+                type(exc).__name__,
+            )
             return self.repository.mark_rule_set_failed(
                 rule_set_id,
                 SAFE_PARSE_ERROR,

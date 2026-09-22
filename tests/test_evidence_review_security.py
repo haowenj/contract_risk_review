@@ -166,6 +166,7 @@ def test_prompt_injection_and_sensitive_values_never_trigger_network_or_targets(
 
 def test_rule_import_error_never_persists_secret_path_or_raw_response(
     tmp_path: Path,
+    caplog,
 ):
     repository = EvidenceReviewRepository(tmp_path / "contracts.db")
     source = tmp_path / "rules.md"
@@ -200,10 +201,12 @@ def test_rule_import_error_never_persists_secret_path_or_raw_response(
 
     assert failed.error_message == "规则文件解析失败，请检查文件内容后重试。"
     assert RAW_SECRET not in external
+    assert RAW_SECRET not in caplog.text
 
 
 def test_run_failure_exposes_only_public_error_and_whitelisted_payload(
     tmp_path: Path,
+    caplog,
 ):
     repository = EvidenceReviewRepository(tmp_path / "contracts.db")
     raw_item = {
@@ -246,5 +249,6 @@ def test_run_failure_exposes_only_public_error_and_whitelisted_payload(
     assert failed.status == "failed"
     assert payload["error_message"] == "人工取证任务执行失败，请稍后重试。"
     assert RAW_SECRET not in external
+    assert RAW_SECRET not in caplog.text
     assert "rule_snapshot" not in payload
     assert "source_path" not in payload

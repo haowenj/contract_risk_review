@@ -156,7 +156,11 @@ class EvidenceReviewWebService:
                 },
             )
         except Exception as exc:
-            LOGGER.exception("Evidence review run failed: %s", run_id)
+            LOGGER.error(
+                "Evidence review run failed: %s (error_type=%s)",
+                run_id,
+                type(exc).__name__,
+            )
             try:
                 return self.repository.mark_evidence_run_failed(
                     run_id,
