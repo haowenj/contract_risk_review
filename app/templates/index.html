@@ -312,8 +312,9 @@
           <span class="status status-{{ contract.status }}">{{ contract.status|status_label }}</span>
           <div class="task-actions">
             {% if contract.status == "ready" %}
-              <a class="button" href="/contracts/{{ contract.contract_id }}/review">风险评估</a>
-              <a class="button primary" href="/contracts/{{ contract.contract_id }}/evaluation">召回测试</a>
+              <a class="button primary" href="/contracts/{{ contract.contract_id }}/evidence-review">人工取证</a>
+              <a class="button" href="/contracts/{{ contract.contract_id }}/review">实验性自动判断（风险评估）</a>
+              <a class="button" href="/contracts/{{ contract.contract_id }}/evaluation">召回测试</a>
               <button type="button" data-reprocess-contract-id="{{ contract.contract_id }}">重新解析</button>
             {% elif contract.status == "failed" %}
               <button type="button" data-reprocess-contract-id="{{ contract.contract_id }}">重新解析</button>
@@ -441,13 +442,18 @@
       const actions = document.createElement('div');
       actions.className = 'task-actions';
       if (contract.status === 'ready') {
+        const evidenceLink = document.createElement('a');
+        evidenceLink.className = 'button primary';
+        evidenceLink.href = `/contracts/${encodeURIComponent(contract.contract_id)}/evidence-review`;
+        evidenceLink.textContent = '人工取证';
+        actions.append(evidenceLink);
         const reviewLink = document.createElement('a');
         reviewLink.className = 'button';
         reviewLink.href = `/contracts/${encodeURIComponent(contract.contract_id)}/review`;
-        reviewLink.textContent = '风险评估';
+        reviewLink.textContent = '实验性自动判断（风险评估）';
         actions.append(reviewLink);
         const evaluationLink = document.createElement('a');
-        evaluationLink.className = 'button primary';
+        evaluationLink.className = 'button';
         evaluationLink.href = `/contracts/${encodeURIComponent(contract.contract_id)}/evaluation`;
         evaluationLink.textContent = '召回测试';
         actions.append(evaluationLink);

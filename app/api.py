@@ -43,6 +43,11 @@ from app.evidence_review.rule_import import (
     build_rule_parse_llm,
     validate_rule_upload,
 )
+from app.evidence_review.web_service import (
+    EvidenceReviewWebService,
+    RuleSetNotActiveError,
+    RuleSetNotFoundError,
+)
 from app.index_manager import IndexManager
 from app.markdown import render_markdown
 from app.pipeline import ContractProcessor
@@ -105,6 +110,7 @@ def create_app(
     contract_review_web_service: ContractReviewWebService | Any | None = None,
     rule_set_repository: EvidenceReviewRepository | None = None,
     rule_set_import_service: RuleSetImportService | Any | None = None,
+    evidence_review_web_service: EvidenceReviewWebService | Any | None = None,
 ) -> FastAPI:
     settings = settings or load_settings()
     active_service = service or build_default_service(settings)
@@ -121,6 +127,14 @@ def create_app(
     active_rule_set_repository = rule_set_repository or EvidenceReviewRepository(
         settings.database_path
     )
+    active_evidence_review_web_service = (
+        evidence_review_web_service
+        or EvidenceReviewWebService(
+            contract_service=active_service,
+            repository=active_rule_set_repository,
+        )
+    )
+    active_evidence_review_web_service.recover_interrupted_runs()
     application = FastAPI(title="Contract Risk Review")
     templates = Jinja2Templates(
         directory=str(Path(__file__).resolve().parent / "templates")
@@ -184,6 +198,54 @@ def create_app(
                 max_upload_bytes=settings.max_rule_upload_bytes,
             )
         importer.import_rule_set(rule_set_id)
+
+    def render_evidence_review_page(
+        request: Request,
+        contract_id: str,
+        *,
+        run_id: str | None = None,
+        error: str | None = None,
+        status_code: int = 200,
+    ) -> HTMLResponse:
+        contract = active_service.get_contract(contract_id)
+        if contract is None:
+            raise HTTPException(status_code=404, detail="contract not found")
+        run_payload = None
+        if run_id:
+            try:
+                run_payload = (
+                    active_evidence_review_web_service.get_run_payload(
+                        contract_id,
+                        run_id,
+                    )
+                )
+            except KeyError as exc:
+                raise HTTPException(
+                    status_code=404,
+                    detail="evidence review run not found",
+                ) from exc
+        if contract.status != "ready" and error is None:
+            error = (
+                f"合同当前状态为 {status_label(contract.status)}，"
+                "完成入库后才能进行人工取证。"
+            )
+        active_rule_sets = [
+            value
+            for value in active_rule_set_repository.list_rule_sets()
+            if value.status == "active"
+        ]
+        return templates.TemplateResponse(
+            request=request,
+            name="evidence_review.html",
+            status_code=status_code,
+            context={
+                "selected_contract": contract,
+                "active_rule_sets": active_rule_sets,
+                "run": run_payload,
+                "run_id": run_id,
+                "error": error,
+            },
+        )
 
     def render_review_page(
         request: Request,
@@ -467,6 +529,24 @@ def create_app(
     def get_rule_set(rule_set_id: str) -> dict[str, Any]:
         return _rule_set_payload(get_rule_set_or_404(rule_set_id))
 
+    @application.get(
+        "/api/contracts/{contract_id}/evidence-review/runs/{run_id}"
+    )
+    def get_evidence_review_run(
+        contract_id: str,
+        run_id: str,
+    ) -> dict[str, Any]:
+        try:
+            return active_evidence_review_web_service.get_run_payload(
+                contract_id,
+                run_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail="evidence review run not found",
+            ) from exc
+
     @application.post("/api/contracts/{contract_id}/reprocess", status_code=202)
     def reprocess_contract(
         contract_id: str,
@@ -626,6 +706,67 @@ def create_app(
             ) from exc
         return RedirectResponse(
             url=f"/rule-sets/{rule_set_id}",
+            status_code=303,
+        )
+
+    @application.get(
+        "/contracts/{contract_id}/evidence-review",
+        response_class=HTMLResponse,
+    )
+    def evidence_review_page(
+        request: Request,
+        contract_id: str,
+        run_id: str | None = None,
+    ) -> HTMLResponse:
+        return render_evidence_review_page(
+            request,
+            contract_id,
+            run_id=run_id,
+        )
+
+    @application.post(
+        "/contracts/{contract_id}/evidence-review/runs",
+        response_class=HTMLResponse,
+    )
+    def create_evidence_review_run(
+        request: Request,
+        contract_id: str,
+        background_tasks: BackgroundTasks,
+        rule_set_id: str = Form(...),
+    ) -> Response:
+        try:
+            run = active_evidence_review_web_service.create_run(
+                contract_id,
+                rule_set_id,
+            )
+        except ContractNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="contract not found") from exc
+        except ContractNotReadyError:
+            return render_evidence_review_page(
+                request,
+                contract_id,
+                error="完成入库后才能进行人工取证。",
+                status_code=409,
+            )
+        except RuleSetNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="rule set not found") from exc
+        except RuleSetNotActiveError:
+            return render_evidence_review_page(
+                request,
+                contract_id,
+                error="所选规则集尚未启用，请先确认并启用规则集。",
+                status_code=409,
+            )
+
+        background_tasks.add_task(
+            active_evidence_review_web_service.execute_run,
+            run.run_id,
+        )
+        return RedirectResponse(
+            url=(
+                f"/contracts/{contract_id}/evidence-review"
+                f"?run_id={run.run_id}"
+            ),
             status_code=303,
         )
 

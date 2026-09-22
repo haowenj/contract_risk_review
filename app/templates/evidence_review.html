@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ selected_contract.filename }} · 人工取证</title>
+  <style>
+    :root{color:#172033;background:#eef3f8;font:15px/1.6 "Avenir Next","Segoe UI",sans-serif}*{box-sizing:border-box}body{margin:0}a{color:#315b8c}.topbar{min-height:64px;padding:0 30px;background:linear-gradient(90deg,#172033,#25344f);color:white;display:flex;align-items:center;justify-content:space-between}.topbar a{color:#d8e4f1;text-decoration:none}.shell{width:min(1120px,calc(100% - 40px));margin:30px auto 64px}.card,.item{border:1px solid #d9e2ec;border-radius:14px;background:white;box-shadow:0 8px 24px #1020380a}.card{padding:22px;margin-bottom:18px}.item{padding:20px;margin:14px 0}h1,h2,h3{margin-top:0}.muted{color:#637189}.error,.notice,.warning{padding:12px 14px;border-radius:9px}.error{background:#fff1f2;color:#b91c1c}.notice{background:#eff6ff;color:#1d4f91}.warning{background:#fff8e6;color:#92400e}form.create{display:flex;gap:10px;align-items:end;flex-wrap:wrap}label span{display:block;font-weight:650;margin-bottom:5px}select,button{min-height:41px;border:1px solid #bdcadd;border-radius:8px;padding:8px 11px;background:white;font:inherit}button{background:#172033;color:white;cursor:pointer}.metrics{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr));gap:10px}.metric{padding:13px;border-radius:10px;background:#f1f5f9}.metric strong{display:block;font-size:22px}.filters{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0}.heading{display:flex;justify-content:space-between;gap:14px}.badges{display:flex;gap:6px;flex-wrap:wrap}.badge{padding:3px 9px;border-radius:999px;background:#e8eef5;font-size:13px}.rule{white-space:pre-wrap}.evidence,.fact,.research,.missing{margin-top:12px;padding:13px;border-radius:10px;background:#f7f9fc}.evidence-text{white-space:pre-wrap}.meta{color:#637189;font-size:13px}.research{background:#eef7ff}.missing{background:#fff8e6}.target{padding:9px;background:white;border-radius:8px;margin:7px 0}.target dl{margin:0;display:grid;grid-template-columns:max-content 1fr;gap:3px 10px}.target dt{font-weight:650}.target dd{margin:0;overflow-wrap:anywhere}.item[hidden]{display:none}@media(max-width:760px){.shell{width:calc(100% - 24px)}.topbar{padding:0 18px}.metrics{grid-template-columns:repeat(2,1fr)}.heading{display:block}}
+  </style>
+</head>
+<body data-run-id="{{ run_id or '' }}" data-run-status="{{ run.status if run else '' }}">
+  <header class="topbar"><strong>合同风险审阅 · 人工取证</strong><a href="/">← 返回合同任务</a></header>
+  <main class="shell">
+    <h1>{{ selected_contract.filename }}</h1>
+    <p class="muted">先提取合同证据和查询所需关键信息，再由人工完成最终判断。</p>
+    {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+
+    {% if not run %}
+      <section class="card">
+        <h2>创建取证任务</h2>
+        {% if active_rule_sets %}
+          <form class="create" action="/contracts/{{ selected_contract.contract_id }}/evidence-review/runs" method="post">
+            <label><span>已启用规则集</span><select name="rule_set_id" required>{% for rule_set in active_rule_sets %}<option value="{{ rule_set.rule_set_id }}">{{ rule_set.name }} · v{{ rule_set.version }}</option>{% endfor %}</select></label>
+            <button type="submit" {% if selected_contract.status != 'ready' %}disabled{% endif %}>开始提取证据</button>
+          </form>
+        {% else %}<p class="notice">还没有已启用的规则集，请先到 <a href="/rule-sets">风险规则库</a> 上传并确认。</p>{% endif %}
+      </section>
+    {% elif run.status in ['queued','processing'] %}
+      <section class="card">
+        <h2>正在提取合同证据</h2>
+        <p id="run-progress" class="notice">{{ run.progress.message }}</p>
+        <p class="muted">已完成 {{ run.progress.completed or 0 }} / {{ run.progress.total or 0 }}</p>
+      </section>
+    {% elif run.status == 'failed' %}
+      <section class="card"><h2>取证任务未完成</h2><p class="error">{{ run.error_message }}</p></section>
+    {% else %}
+      {% set items = run['items'] %}
+      <section class="card">
+        <h2>取证概览</h2>
+        <div class="metrics">
+          <div class="metric"><small>检查项</small><strong>{{ items|length }}</strong></div>
+          <div class="metric"><small>找到证据</small><strong>{{ items|selectattr('evidence_package.evidence_status','equalto','found')|list|length }}</strong></div>
+          <div class="metric"><small>未找到</small><strong>{{ items|selectattr('evidence_package.evidence_status','equalto','not_found')|list|length }}</strong></div>
+          <div class="metric"><small>缺少资料</small><strong>{{ items|selectattr('evidence_package.evidence_status','equalto','source_missing')|list|length }}</strong></div>
+          <div class="metric"><small>待人工审核</small><strong>{{ items|length }}</strong></div>
+        </div>
+        <div class="filters">
+          <label><span>证据状态</span><select id="evidence-status-filter"><option value="">全部</option><option value="found">找到证据</option><option value="not_found">未找到</option><option value="source_missing">缺少资料</option><option value="extraction_failed">取证失败</option></select></label>
+          <label><span>查询状态</span><select id="research-status-filter"><option value="">全部</option><option value="pending">待查询</option><option value="not_required">无需查询</option></select></label>
+          <label><span>人工状态</span><select id="human-status-filter"><option value="">全部</option><option value="pending">待审核</option><option value="completed">已完成</option></select></label>
+        </div>
+      </section>
+
+      <section id="evidence-items">
+        {% for entry in items %}
+          {% set item = entry.rule_snapshot %}{% set package = entry.evidence_package %}{% set research = package.research_package %}
+          <article class="item" id="item-{{ item.item_id }}" data-evidence-status="{{ package.evidence_status }}" data-research-status="{{ research.research_status if research else 'not_required' }}" data-human-status="pending">
+            <div class="heading"><div><div class="muted">{{ item.section_path|join(' / ') }}</div><h3>{{ item.source_number or '' }} {{ item.name }}</h3></div><div class="badges"><span class="badge">{{ package.evidence_status }}</span>{% if research %}<span class="badge">{{ research.research_status }}</span>{% endif %}<span class="badge">待人工审核</span></div></div>
+            <p class="rule">{{ item.rule_text }}</p>
+            {% if package.evidence_status == 'not_found' %}<p class="warning">未找到不等于合同没有约定，请人工核对全文及附件。</p>{% endif %}
+            {% if package.item_error %}<p class="error">{{ package.item_error }}</p>{% endif %}
+            {% for evidence in package.evidence %}<div class="evidence"><div class="meta">{% if evidence.page_idx is not none %}第 {{ evidence.page_idx + 1 }} 页 · {% endif %}来源对象 {{ evidence.source_object_index }} · {{ evidence.node_type }}</div><div class="evidence-text">{{ evidence.evidence_text }}</div></div>{% endfor %}
+            {% for fact in package.extracted_facts %}<div class="fact"><strong>{{ fact.label }}</strong>：{{ fact.value }}{% if fact.unit %} {{ fact.unit }}{% endif %}<div class="meta">字段 {{ fact.fact_key }} · 证据 {{ fact.evidence_indices|join('、') }}</div></div>{% endfor %}
+            {% if package.missing_sources %}<div class="missing"><strong>缺失资料</strong><ul>{% for source in package.missing_sources %}<li>{{ source }}</li>{% endfor %}</ul></div>{% endif %}
+            {% if research %}<div class="research"><strong>待查询与比对</strong><p>{{ research.reason }}</p>{% for target in research.query_targets %}<div class="target"><strong>{{ target.target_type }}</strong><dl>{% for key,value in target.fields.items() %}<dt>{{ key }}</dt><dd>{{ value }}</dd>{% endfor %}</dl></div>{% endfor %}{% if research.missing_identifiers %}<p class="warning"><strong>关键信息缺失：</strong>{{ research.missing_identifiers|join('、') }}</p>{% endif %}<p><strong>查询内容：</strong>{{ research.query_topics|join('、') }}</p><p><strong>待比对标准：</strong>{{ research.comparison_points|join('、') }}</p><p class="meta">建议来源：{{ research.source_types|join('、') }}</p></div>{% endif %}
+          </article>
+        {% endfor %}
+      </section>
+    {% endif %}
+  </main>
+  <script>
+    const runId = document.body.dataset.runId;
+    const runStatus = document.body.dataset.runStatus;
+    if (runId && ['queued','processing'].includes(runStatus)) {
+      const endpoint = '/api/contracts/{{ selected_contract.contract_id }}/evidence-review/runs/{{ run_id or "" }}';
+      setTimeout(async () => { const response = await fetch(endpoint,{cache:'no-store'}); if(response.ok) location.reload(); }, 3000);
+    }
+    const filters = ['evidence-status-filter','research-status-filter','human-status-filter'].map((id)=>document.getElementById(id)).filter(Boolean);
+    const filterFields = {'evidence-status-filter':'evidenceStatus','research-status-filter':'researchStatus','human-status-filter':'humanStatus'};
+    function applyFilters(){document.querySelectorAll('#evidence-items .item').forEach((card)=>{card.hidden=filters.some((filter)=>filter.value && card.dataset[filterFields[filter.id]] !== filter.value);});}
+    filters.forEach((filter)=>filter.addEventListener('change',applyFilters));
+  </script>
+</body>
+</html>

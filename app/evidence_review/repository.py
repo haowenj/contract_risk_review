@@ -376,6 +376,17 @@ class EvidenceReviewRepository:
     ) -> EvidenceReviewRunRecord:
         timestamp = self._now()
         with self._write_lock, self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT rule_snapshot_json FROM evidence_review_runs
+                WHERE run_id = ? AND status = 'queued'
+                """,
+                (run_id,),
+            ).fetchone()
+            if row is None:
+                raise EvidenceRunTransitionError(run_id)
+            snapshot = json.loads(row["rule_snapshot_json"])
+            total = len(snapshot.get("review_items", []))
             cursor = connection.execute(
                 """
                 UPDATE evidence_review_runs
@@ -390,6 +401,7 @@ class EvidenceReviewRepository:
                             "stage": "processing",
                             "message": "正在提取合同证据",
                             "completed": 0,
+                            "total": total,
                         },
                         ensure_ascii=False,
                     ),
