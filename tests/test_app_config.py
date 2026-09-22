@@ -21,6 +21,8 @@ class SettingsTest(TestCase):
         self.assertEqual(settings.data_dir, Path(temp_dir) / "data")
         self.assertEqual(settings.database_path, Path(temp_dir) / "data" / "contracts.db")
         self.assertEqual(settings.contracts_dir, Path(temp_dir) / "data" / "contracts")
+        self.assertEqual(settings.rule_sets_dir, Path(temp_dir) / "data" / "rule_sets")
+        self.assertEqual(settings.max_rule_upload_bytes, 20 * 1024 * 1024)
 
     def test_environment_variables_override_storage_paths(self):
         with patch.dict(
@@ -29,6 +31,8 @@ class SettingsTest(TestCase):
                 "APP_DATA_DIR": "/tmp/rag-data",
                 "APP_DATABASE_PATH": "/tmp/rag.db",
                 "APP_CONTRACTS_DIR": "/tmp/contracts",
+                "APP_RULE_SETS_DIR": "/tmp/rule-sets",
+                "MAX_RULE_UPLOAD_BYTES": "1024",
             },
             clear=False,
         ):
@@ -37,6 +41,8 @@ class SettingsTest(TestCase):
         self.assertEqual(settings.data_dir, Path("/tmp/rag-data"))
         self.assertEqual(settings.database_path, Path("/tmp/rag.db"))
         self.assertEqual(settings.contracts_dir, Path("/tmp/contracts"))
+        self.assertEqual(settings.rule_sets_dir, Path("/tmp/rule-sets"))
+        self.assertEqual(settings.max_rule_upload_bytes, 1024)
 
     def test_load_settings_reads_image_vision_configuration(self):
         with patch.dict(
