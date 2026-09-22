@@ -2,11 +2,25 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from langchain_openai import ChatOpenAI
 from mineru_raw_parse import run_parse
+
+from app.evidence_review.repository import (
+    EvidenceReviewRepository,
+    RuleSetRecord,
+)
+from app.evidence_review.schemas import RuleParseResult
+
+
+LOGGER = logging.getLogger(__name__)
+RULE_PARSE_TIMEOUT_SECONDS = 120.0
+SAFE_PARSE_ERROR = "规则文件解析失败，请检查文件内容后重试。"
 
 
 @dataclass(frozen=True)
@@ -126,3 +140,111 @@ class RuleDocumentExtractor:
             blocks=blocks,
             page_count=max(int(value["page_number"]) for value in blocks),
         )
+
+
+def build_rule_parse_llm() -> Any:
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "contract_risk_rule_parse",
+            "strict": True,
+            "schema": RuleParseResult.model_json_schema(),
+        },
+    }
+    return ChatOpenAI(
+        model=os.environ["LLM_MODEL"],
+        api_key=os.environ["LLM_API_KEY"],
+        base_url=os.environ["LLM_BASE_URL"],
+        temperature=0,
+        timeout=RULE_PARSE_TIMEOUT_SECONDS,
+        max_retries=0,
+        reasoning_effort="none",
+    ).bind(response_format=response_format)
+
+
+def _response_text(response: Any) -> str:
+    content = getattr(response, "content", response)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        text_parts = [
+            part.get("text", "")
+            for part in content
+            if isinstance(part, dict) and isinstance(part.get("text"), str)
+        ]
+        if text_parts:
+            return "".join(text_parts)
+    raise ValueError("规则解析模型没有返回 JSON 文本。")
+
+
+class RuleSetImportService:
+    def __init__(
+        self,
+        *,
+        repository: EvidenceReviewRepository,
+        extractor: RuleDocumentExtractor,
+        parse_llm: Any,
+        rule_sets_dir: Path,
+        max_upload_bytes: int,
+    ):
+        self.repository = repository
+        self.extractor = extractor
+        self.parse_llm = parse_llm
+        self.rule_sets_dir = Path(rule_sets_dir)
+        self.max_upload_bytes = max_upload_bytes
+
+    def import_rule_set(self, rule_set_id: str) -> RuleSetRecord:
+        record = self.repository.get_rule_set(rule_set_id)
+        if record is None:
+            raise KeyError(rule_set_id)
+        self.repository.mark_rule_set_processing(rule_set_id)
+
+        try:
+            content = Path(record.source_path).read_bytes()
+            upload = validate_rule_upload(
+                record.source_filename,
+                content,
+                max_bytes=self.max_upload_bytes,
+            )
+            document = self.extractor.extract(
+                upload,
+                self.rule_sets_dir / rule_set_id,
+            )
+
+            # Import locally to avoid a module cycle: prompts needs the extracted
+            # document type defined in this module.
+            from app.evidence_review.prompts import build_rule_parse_prompt
+
+            response = self.parse_llm.invoke(build_rule_parse_prompt(document))
+            parsed = RuleParseResult.model_validate_json(_response_text(response))
+            parsed_json = parsed.model_dump(mode="json")
+            parsed_json["schema_version"] = "1.0"
+            parsed_json["source"] = {
+                "filename": upload.filename,
+                "sha256": upload.sha256,
+                "page_count": document.page_count,
+            }
+            parsed_json["summary"] = self._build_summary(parsed)
+            return self.repository.mark_rule_set_draft(
+                rule_set_id,
+                parsed_json,
+            )
+        except Exception:
+            LOGGER.exception("Rule-set import failed for %s", rule_set_id)
+            return self.repository.mark_rule_set_failed(
+                rule_set_id,
+                SAFE_PARSE_ERROR,
+            )
+
+    @staticmethod
+    def _build_summary(parsed: RuleParseResult) -> dict[str, int]:
+        process_count = sum(
+            item.item_kind == "process_control"
+            for item in parsed.review_items
+        )
+        return {
+            "section_count": len(parsed.sections),
+            "review_item_count": len(parsed.review_items),
+            "review_check_count": len(parsed.review_items) - process_count,
+            "process_control_count": process_count,
+        }
