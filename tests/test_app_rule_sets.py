@@ -246,7 +246,7 @@ def test_failed_rule_set_shows_only_saved_safe_error(tmp_path: Path):
     assert "source_path" not in payload
 
 
-def test_dashboard_links_to_rule_set_management(tmp_path: Path):
+def test_dashboard_keeps_main_flows_without_duplicate_header_links(tmp_path: Path):
     client, _, _, _ = build_client(tmp_path)
 
     response = client.get("/")
@@ -256,6 +256,8 @@ def test_dashboard_links_to_rule_set_management(tmp_path: Path):
     assert "上传或查看规则" in response.text
     assert "规则文件" in response.text
     assert "合同校验" in response.text
+    assert '<nav aria-label="主流程">' not in response.text
+    assert 'href="#contracts"' not in response.text
 
 
 def test_active_rule_set_detail_offers_contract_flow(tmp_path: Path):
