@@ -6,46 +6,65 @@
   <title>{{ rule_set.name }} · 风险规则库</title>
   <style>
     :root { color:#172033; background:#f3f6fa; font:15px/1.55 "Avenir Next","Segoe UI",sans-serif; }
-    * { box-sizing:border-box; } body{margin:0} a{color:#315b8c}.topbar{min-height:64px;padding:0 30px;background:#172033;color:white;display:flex;align-items:center;justify-content:space-between}.topbar a{color:white;text-decoration:none}
-    main{width:min(1080px,calc(100% - 40px));margin:32px auto 64px}h1{margin:0}.muted{color:#637189}.meta{display:flex;gap:14px;flex-wrap:wrap;margin:8px 0 24px}.badge{padding:3px 9px;border-radius:999px;background:#e8eef6;font-size:13px}.panel,.item{border:1px solid #d9e2ec;border-radius:14px;background:white;box-shadow:0 8px 24px #1020380a}.panel{padding:20px;margin:18px 0}.item{padding:20px;margin:12px 0}.item h3{margin:0 0 8px}.source-number{color:#315b8c;margin-right:7px}.path{color:#637189;font-size:13px}.columns{display:grid;grid-template-columns:1fr 1fr;gap:18px}.group{padding:13px;border-radius:10px;background:#f7f9fc}.group h4{margin:0 0 7px}.group ul{margin:6px 0;padding-left:20px}.warning,.error{padding:12px 14px;border-radius:9px}.warning{background:#fff8e6;color:#92400e}.error{background:#fff1f2;color:#b91c1c}.actions{margin:20px 0}button{border:0;border-radius:8px;padding:10px 15px;background:#172033;color:white;font:inherit;cursor:pointer}.status{font-weight:700}.pages{color:#637189;font-size:13px}@media(max-width:720px){.columns{grid-template-columns:1fr}main{width:calc(100% - 24px)}}
+    * { box-sizing:border-box; }
+    body { margin:0; }
+    a { color:#315b8c; }
+    .topbar { min-height:64px; padding:0 30px; background:#172033; color:white; display:flex; align-items:center; justify-content:space-between; gap:16px; }
+    .topbar a { color:white; text-decoration:none; }
+    main { width:min(1080px,calc(100% - 40px)); margin:32px auto 64px; }
+    h1,h2,h3,p { margin-top:0; }
+    .page-title { margin-bottom:25px; }
+    .page-title h1 { margin:5px 0 10px; font-size:28px; overflow-wrap:anywhere; }
+    .eyebrow { color:#426486; font-size:12px; font-weight:750; letter-spacing:.06em; }
+    .meta { display:flex; align-items:center; gap:12px; flex-wrap:wrap; color:#637189; overflow-wrap:anywhere; }
+    .badge { display:inline-block; padding:4px 10px; border-radius:999px; background:#e8eef6; color:#315b8c; font-size:13px; font-weight:700; white-space:nowrap; }
+    .panel,.rule-card { border:1px solid #d9e2ec; border-radius:14px; background:white; box-shadow:0 8px 24px #1020380a; }
+    .panel { padding:22px; }
+    .error { padding:13px 15px; border-radius:9px; background:#fff1f2; color:#b91c1c; }
+    .muted { color:#637189; }
+    .list-heading { display:flex; justify-content:space-between; align-items:center; gap:20px; margin-bottom:18px; }
+    .list-heading h2 { margin:0 0 4px; font-size:23px; }
+    .list-heading p { margin:0; }
+    .actions { flex-shrink:0; }
+    .button,button { display:inline-block; border:0; border-radius:8px; padding:10px 16px; background:#172033; color:white; font:inherit; text-decoration:none; cursor:pointer; }
+    .rule-list { list-style:none; margin:0; padding:0; display:grid; gap:12px; }
+    .rule-card { display:grid; grid-template-columns:42px minmax(0,1fr) auto; gap:16px; align-items:start; padding:20px; }
+    .ordinal { display:flex; align-items:center; justify-content:center; width:38px; height:38px; border-radius:10px; background:#eaf1f8; color:#315b8c; font-weight:750; }
+    .rule-copy { min-width:0; }
+    .rule-text { margin:4px 0 0; color:#24344b; font-size:16px; line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .pages { padding:6px 10px; border-radius:7px; background:#f1f5f9; color:#53657d; font-size:13px; white-space:nowrap; }
+    @media(max-width:720px) { .topbar{padding:0 18px} main{width:calc(100% - 24px)} .list-heading{align-items:flex-start;flex-direction:column} .rule-card{grid-template-columns:38px 1fr;gap:10px;padding:16px} .pages{grid-column:2;justify-self:start} }
   </style>
 </head>
 <body data-rule-set-id="{{ rule_set.rule_set_id }}" data-status="{{ rule_set.status }}">
   <header class="topbar"><strong>风险规则库</strong><a href="/rule-sets">返回规则列表</a></header>
   <main>
     {% set status_labels = {'queued':'排队中','processing':'解析中','draft':'待确认启用','active':'已启用','failed':'解析失败'} %}
-    {% set kind_labels = {'review_check':'审核项','process_control':'流程控制项'} %}
-    {% set scope_labels = {'contract':'合同内容','internal_material':'内部资料','external_query':'外部查询','hybrid':'合同与补充资料'} %}
-    {% set mode_labels = {'automatic_structure_check':'结构检查','threshold_required':'需要阈值判断','expert_review':'人工复核','query_and_compare':'查询并比对'} %}
-    {% set source_labels = {'public_query':'公开信息','internal_material':'内部资料','professional_database':'专业数据库','expert_opinion':'专家意见'} %}
-    <h1>{{ rule_set.name }} · v{{ rule_set.version }}</h1>
-    <div class="meta"><span class="badge status">{{ status_labels.get(rule_set.status, rule_set.status) }}</span><span>{{ rule_set.source_filename }}</span></div>
+    <div class="page-title">
+      <div class="eyebrow">规则文件 · v{{ rule_set.version }}</div>
+      <h1>{{ rule_set.name }}</h1>
+      <div class="meta"><span class="badge">{{ status_labels.get(rule_set.status, rule_set.status) }}</span><span>{{ rule_set.source_filename }}</span></div>
+    </div>
     {% if rule_set.status in ['queued', 'processing'] %}
-      <section class="panel"><strong>正在解析规则文件…</strong><p class="muted">页面会自动刷新，完成后可预览并启用。</p></section>
+      <section class="panel"><strong>正在解析规则文件…</strong><p class="muted">页面会自动刷新，完成后可查看提取的规则。</p></section>
     {% elif rule_set.status == 'failed' %}
       <div class="error" role="alert">{{ rule_set.error_message or '规则文件解析失败，请检查文件内容后重试。' }}</div>
     {% else %}
-      {% set parsed = rule_set.parsed_rules %}
-      <section class="panel">
-        <h2>{{ parsed.document_title }}</h2>
-        <p>章节 {{ parsed.summary.section_count }} · 审核项 {{ parsed.summary.review_item_count }} · 流程项 {{ parsed.summary.process_control_count }}</p>
-        {% for section in parsed.sections %}<div style="margin-left:{{ (section.level - 1) * 20 }}px"><span class="source-number">{{ section.source_number or '' }}</span>{{ section.title }} <span class="pages">第 {{ section.source_pages|join('、') }} 页</span></div>{% endfor %}
-      </section>
-      {% if rule_set.status == 'draft' %}<form class="actions" action="/rule-sets/{{ rule_set.rule_set_id }}/activate" method="post"><button type="submit">确认并启用此版本</button></form>{% endif %}
-      {% if rule_set.status == 'active' %}<section class="panel"><strong>这套规则已启用，可以用于合同校验。</strong><p><a href="/">前往合同校验</a></p></section>{% endif %}
-      {% for warning in parsed.warnings or [] %}<p class="warning">{{ warning }}</p>{% endfor %}
-      {% for item in parsed.review_items %}
-        <article class="item">
-          <div class="path">{{ item.section_path|join(' / ') }}</div>
-          <h3><span class="source-number">{{ item.source_number or '' }}</span>{{ item.name }}</h3>
-          <p>{{ item.rule_text }}</p>
-          <p class="pages">第 {{ item.source_pages|join('、') }} 页 · {{ kind_labels.get(item.item_kind, '其他检查项') }} · {{ scope_labels.get(item.evidence_scope, '其他资料') }} · {{ mode_labels.get(item.decision_mode, '人工复核') }}</p>
-          <div class="columns">
-            <section class="group"><h4>合同取证与事实</h4><ul>{% for query in item.retrieval_queries %}<li>{{ query }}</li>{% endfor %}</ul>{% for fact in item.fact_requirements %}<p><strong>{{ fact.label }}</strong>{% if fact.required %}（必填）{% endif %}</p>{% else %}<p class="muted">无结构化事实要求</p>{% endfor %}</section>
-            <section class="group"><h4>外部或内部查询需求</h4>{% for research in item.research_requirements %}<p>建议来源：{{ source_labels.get(research.source_type, '其他资料') }}</p><p>查询：{{ research.query_topics|join('、') }}</p><p>比对：{{ research.comparison_points|join('、') }}</p>{% else %}<p class="muted">无需额外查询</p>{% endfor %}</section>
-          </div>
-        </article>
-      {% endfor %}
+      {% set items = rule_set.parsed_rules.review_items %}
+      <div class="list-heading">
+        <div><h2>提取的规则</h2><p class="muted">共 {{ items|length }} 条规则；页码对应上传文件中的位置。</p></div>
+        {% if rule_set.status == 'draft' %}<form class="actions" action="/rule-sets/{{ rule_set.rule_set_id }}/activate" method="post"><button type="submit">确认并启用此版本</button></form>{% endif %}
+        {% if rule_set.status == 'active' %}<a class="button actions" href="/">前往合同校验</a>{% endif %}
+      </div>
+      <ol class="rule-list">
+        {% for item in items %}
+          <li class="rule-card">
+            <span class="ordinal">{{ loop.index }}</span>
+            <div class="rule-copy"><p class="rule-text">{{ item.rule_text or item.name }}</p></div>
+            <span class="pages">{% if item.source_pages %}第 {{ item.source_pages|join('、') }} 页{% else %}页码未识别{% endif %}</span>
+          </li>
+        {% else %}<li class="panel muted">未提取到规则，请检查原文件。</li>{% endfor %}
+      </ol>
     {% endif %}
   </main>
   <script>

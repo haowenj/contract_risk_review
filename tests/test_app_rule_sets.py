@@ -168,31 +168,35 @@ def test_invalid_upload_returns_safe_form_error(tmp_path: Path):
     assert importer.rule_set_ids == []
 
 
-def test_draft_detail_renders_structure_classification_and_data_needs(
+def test_draft_detail_shows_only_extracted_rules_and_source_pages(
     tmp_path: Path,
 ):
     client, repository, _, _ = build_client(tmp_path)
     record = create_record(repository, tmp_path)
     repository.mark_rule_set_processing(record.rule_set_id)
-    repository.mark_rule_set_draft(record.rule_set_id, draft_payload())
+    payload = draft_payload()
+    payload["review_items"][0]["name"] = "机器生成的摘要"
+    repository.mark_rule_set_draft(record.rule_set_id, payload)
 
     response = client.get(f"/rule-sets/{record.rule_set_id}")
 
     assert response.status_code == 200
+    assert "共 1 条规则" in response.text
+    assert "付款条件" in response.text
+    assert "付款条件应结合合同约定核验" in response.text
+    assert "第 2 页" in response.text
+    assert "确认并启用此版本" in response.text
+    assert "机器生成的摘要" not in response.text
     for text in [
         "项目风险审查规则",
-        "一、",
-        "1.2",
-        "付款条件应结合合同约定核验",
-        "第 2 页",
-        "合同与补充资料",
-        "查询并比对",
+        "合同条件",
+        "章节 1",
+        "合同取证与事实",
         "相对方公司名称",
         "企业登记状态",
-        "名称及存续状态",
         "第 3 页图片文字请人工确认",
     ]:
-        assert text in response.text
+        assert text not in response.text
 
 
 def test_draft_can_be_activated_and_api_payload_is_whitelisted(tmp_path: Path):
