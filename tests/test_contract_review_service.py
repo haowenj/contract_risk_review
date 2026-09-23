@@ -104,6 +104,20 @@ def ready_contract():
     return SimpleNamespace(contract_id="contract-1", status="ready")
 
 
+def test_parse_then_continue_reuses_saved_items_without_parsing_again():
+    contract = FakeContractService(ready_contract())
+    service = build_service(contract)
+
+    items = service.parse_rules("付款期限不得超过90日")
+    assert items == ITEMS["review_items"]
+    assert contract.searches == []
+
+    result = service.run_preparsed("contract-1", "付款期限不得超过90日", items)
+    assert result["summary"]["total_items"] == 1
+    assert contract.searches == [("contract-1", "合同约定的付款期限是多久")]
+    assert service.nodes.parse_llm.calls == 1
+
+
 def test_default_llms_use_vllm_openai_reasoning_protocol():
     with mock.patch.object(contract_review_service, "ChatOpenAI") as factory:
         contract_review_service.build_contract_review_service(

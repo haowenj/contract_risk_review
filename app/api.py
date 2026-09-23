@@ -52,7 +52,7 @@ from app.evidence_review.web_service import (
 from app.index_manager import IndexManager
 from app.markdown import render_markdown
 from app.pipeline import ContractProcessor
-from app.review_db import ContractReviewRepository
+from app.review_db import ContractReviewRepository, ReviewRunTransitionError
 from app.review_service import ContractReviewWebService
 from app.service import (
     ContractNotFoundError,
@@ -940,7 +940,63 @@ def create_app(
             run.run_id,
         )
         return RedirectResponse(
-            url=f"/contracts/{contract_id}/review?run_id={run.run_id}",
+            url=f"/contracts/{contract_id}/review/runs/{run.run_id}/rules",
+            status_code=303,
+        )
+
+    @application.get(
+        "/contracts/{contract_id}/review/runs/{run_id}/rules",
+        response_class=HTMLResponse,
+    )
+    def review_rules_page(
+        request: Request, contract_id: str, run_id: str
+    ) -> Response:
+        contract = active_service.get_contract(contract_id)
+        if contract is None:
+            raise HTTPException(status_code=404, detail="contract not found")
+        try:
+            run = active_contract_review_web_service.get_run_payload(
+                contract_id, run_id
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="review run not found") from exc
+        if run["status"] == "ready" or (
+            run["status"] == "processing"
+            and run["progress"].get("stage") not in {
+                "parsing_rules", "rules_parsed", "rules_ready"
+            }
+        ):
+            return RedirectResponse(
+                url=f"/contracts/{contract_id}/review?run_id={run_id}",
+                status_code=303,
+            )
+        return templates.TemplateResponse(
+            request=request,
+            name="review_rules.html",
+            context={"selected_contract": contract, "review_run": run},
+        )
+
+    @application.post("/contracts/{contract_id}/review/runs/{run_id}/continue")
+    def continue_contract_review_run(
+        contract_id: str,
+        run_id: str,
+        background_tasks: BackgroundTasks,
+    ) -> Response:
+        try:
+            active_contract_review_web_service.claim_continue_run(
+                contract_id, run_id
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="review run not found") from exc
+        except ReviewRunTransitionError as exc:
+            raise HTTPException(
+                status_code=409, detail="review run is not waiting to continue"
+            ) from exc
+        background_tasks.add_task(
+            active_contract_review_web_service.execute_review, run_id
+        )
+        return RedirectResponse(
+            url=f"/contracts/{contract_id}/review?run_id={run_id}",
             status_code=303,
         )
 

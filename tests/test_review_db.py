@@ -67,6 +67,25 @@ class ContractReviewRepositoryTest(TestCase):
         self.assertEqual(loaded.result, result)
         json.dumps(loaded.result, ensure_ascii=False)
 
+    def test_parsed_rules_pause_survives_reload_and_continue_is_single_use(self):
+        with TemporaryDirectory() as temp_dir:
+            repository = self._build(Path(temp_dir))
+            run = repository.create_run("c1", "规范")
+            repository.mark_processing(run.run_id, {"stage": "parsing_rules"})
+            repository.update_progress(run.run_id, {"stage": "rules_parsed"})
+            items = [{"id": "i1", "name": "付款", "rule_basis": "90日内付款",
+                      "review_goal": "核验期限", "retrieval_query": "付款期限"}]
+            repository.mark_rules_ready(run.run_id, items)
+
+            reloaded = ContractReviewRepository(repository.database_path).get_run(run.run_id)
+            self.assertEqual(reloaded.status, "processing")
+            self.assertEqual(reloaded.progress["stage"], "rules_ready")
+            self.assertEqual(reloaded.result["review_items"], items)
+            self.assertEqual(repository.recover_incomplete_runs("中断"), 0)
+            repository.mark_reviewing(run.run_id, {"stage": "reviewing"})
+            with self.assertRaises(ReviewRunTransitionError):
+                repository.mark_reviewing(run.run_id, {"stage": "reviewing"})
+
     def test_failed_and_interrupted_runs_are_persisted(self):
         with TemporaryDirectory() as temp_dir:
             repository = self._build(Path(temp_dir))

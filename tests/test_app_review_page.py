@@ -140,6 +140,13 @@ class SuccessfulReviewService:
         result["review_rule_text"] = review_rule_text
         return result
 
+    def parse_rules(self, review_rule_text):
+        return REVIEW_RESULT["review_items"]
+
+    def run_preparsed(self, contract_id, review_rule_text, review_items):
+        assert review_items == REVIEW_RESULT["review_items"]
+        return self.run(contract_id, review_rule_text)
+
 
 def settings_for(root: Path) -> Settings:
     return Settings(
@@ -183,7 +190,10 @@ def build_client(root: Path, *, status="ready"):
 
 
 def run_id_from(response):
-    return parse_qs(urlparse(response.headers["location"]).query)["run_id"][0]
+    location = urlparse(response.headers["location"])
+    if location.query:
+        return parse_qs(location.query)["run_id"][0]
+    return location.path.split("/")[-2]
 
 
 def test_ready_review_page_shows_text_and_txt_md_inputs():
@@ -213,7 +223,7 @@ def test_review_page_includes_back_to_top_button():
     assert "prefers-reduced-motion" in response.text
 
 
-def test_text_submission_creates_run_executes_in_background_and_redirects():
+def test_text_submission_pauses_after_parsing_and_continue_starts_review():
     with TemporaryDirectory() as temp_dir:
         client, _, repository, _ = build_client(Path(temp_dir))
 
@@ -224,12 +234,52 @@ def test_text_submission_creates_run_executes_in_background_and_redirects():
         )
         run_id = run_id_from(response)
         run = repository.get_run(run_id)
+        preview = client.get(f"/contracts/c1/review/runs/{run_id}/rules")
+        preview_api = client.get(f"/api/contracts/c1/review/runs/{run_id}")
+        continued = client.post(
+            f"/contracts/c1/review/runs/{run_id}/continue",
+            follow_redirects=False,
+        )
+        completed = repository.get_run(run_id)
 
     assert response.status_code == 303
-    assert response.headers["location"] == f"/contracts/c1/review?run_id={run_id}"
-    assert run.status == "ready"
+    assert response.headers["location"] == f"/contracts/c1/review/runs/{run_id}/rules"
+    assert run.status == "processing"
+    assert run.progress["stage"] == "rules_ready"
     assert run.review_rule_text == "付款期限不得超过90日"
-    assert run.result["contract_id"] == "c1"
+    assert run.result["review_items"] == REVIEW_RESULT["review_items"]
+    assert "规则解析结果" in preview.text
+    assert "不得违法分包" in preview.text
+    assert "核验限制条款" in preview.text
+    assert "内部查询不应展示" in preview.text
+    assert "查看完整规则 JSON" in preview.text
+    assert preview_api.json()["parsed_review_items"] == REVIEW_RESULT["review_items"]
+    assert preview_api.json()["result"] == {}
+    assert f'/contracts/c1/review/runs/{run_id}/continue' in preview.text
+    assert continued.status_code == 303
+    assert completed.status == "ready"
+    assert completed.result["contract_id"] == "c1"
+
+
+def test_continue_rejects_run_owned_by_another_contract_or_already_started():
+    with TemporaryDirectory() as temp_dir:
+        client, contracts, repository, _ = build_client(Path(temp_dir))
+        other = contracts.create("other.pdf", Path(temp_dir) / "other", contract_id="c2")
+        contracts.update_status(other.contract_id, "ready", index_version="index-v2")
+        created = client.post(
+            "/contracts/c1/review/runs",
+            data={"review_rule_text": "规范"},
+            follow_redirects=False,
+        )
+        run_id = run_id_from(created)
+        wrong_owner = client.post(f"/contracts/c2/review/runs/{run_id}/continue")
+        wrong_preview = client.get(f"/contracts/c2/review/runs/{run_id}/rules")
+        client.post(f"/contracts/c1/review/runs/{run_id}/continue")
+        duplicate = client.post(f"/contracts/c1/review/runs/{run_id}/continue")
+
+    assert wrong_owner.status_code == 404
+    assert wrong_preview.status_code == 404
+    assert duplicate.status_code == 409
 
 
 @pytest.mark.parametrize("filename", ["rules.txt", "rules.md"])

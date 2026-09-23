@@ -174,6 +174,7 @@
 <body
   data-run-id="{{ run_id or '' }}"
   data-run-status="{{ review_run.status if review_run else '' }}"
+  data-run-stage="{{ review_run.progress.stage if review_run else '' }}"
 >
   <header class="topbar">
     <strong>合同风险审阅 · 风险评估</strong>
@@ -203,7 +204,7 @@
             <input id="review-rule-file" name="review_rule_file" type="file" accept=".txt,.md,text/plain,text/markdown">
           </div>
           <div class="actions">
-            <button class="primary" type="submit">开始风险评估</button>
+            <button class="primary" type="submit">解析审查规范</button>
           </div>
         </form>
       {% elif not review_run %}
@@ -214,7 +215,9 @@
     {% if review_run %}
       <section class="card" id="review-run">
         <h2>风险审查结果</h2>
-        {% if review_run.status in ["queued", "processing"] %}
+        {% if review_run.progress.stage == "rules_ready" %}
+          <div class="run-status">规则解析完成。<a href="/contracts/{{ selected_contract.contract_id }}/review/runs/{{ run_id }}/rules">查看规则并继续</a></div>
+        {% elif review_run.status in ["queued", "processing"] %}
           <div class="run-status">
             <strong id="run-status">{{ "排队中" if review_run.status == "queued" else "处理中" }}</strong>
             <div id="progress-message">{{ review_run.progress.message or "等待开始风险审查" }}</div>
@@ -296,6 +299,7 @@
   <script>
     const runId = document.body.dataset.runId;
     const initialStatus = document.body.dataset.runStatus;
+    const initialStage = document.body.dataset.runStage;
     const progressMessage = document.querySelector('#progress-message');
     const runStatus = document.querySelector('#run-status');
 
@@ -308,6 +312,10 @@
         );
         if (!response.ok) return;
         const payload = await response.json();
+        if (payload.progress?.stage === 'rules_ready') {
+          window.location.href = `/contracts/{{ selected_contract.contract_id }}/review/runs/${encodeURIComponent(runId)}/rules`;
+          return;
+        }
         if (payload.status === 'queued' || payload.status === 'processing') {
           if (runStatus) runStatus.textContent = payload.status === 'queued' ? '排队中' : '处理中';
           if (progressMessage && payload.progress?.message) {
@@ -323,7 +331,7 @@
       }
     }
 
-    if (runId && ['queued', 'processing'].includes(initialStatus)) {
+    if (runId && initialStage !== 'rules_ready' && ['queued', 'processing'].includes(initialStatus)) {
       window.setTimeout(pollRun, 1000);
     }
   </script>

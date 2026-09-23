@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ selected_contract.filename }} · 规则解析结果</title>
+  <style>
+    :root { color:#172033; background:#eef3f8; font:15px/1.6 "Avenir Next","Segoe UI",sans-serif; }
+    * { box-sizing:border-box; } body { margin:0; }
+    .topbar { min-height:64px; padding:0 30px; background:#172033; color:white; display:flex; align-items:center; justify-content:space-between; gap:20px; }
+    .topbar a { color:#d8e4f1; text-decoration:none; }
+    main { width:min(1080px,calc(100% - 40px)); margin:30px auto 64px; }
+    h1 { margin:0 0 6px; font-size:24px; } h2 { font-size:18px; }
+    .muted { color:#5f7087; } .card { padding:22px; border:1px solid #d9e2ec; border-radius:14px; background:white; box-shadow:0 8px 24px #1020380a; }
+    .rule { margin-top:12px; padding:16px; border:1px solid #d9e2ec; border-radius:10px; background:#fbfdff; }
+    .rule h2 { margin:0 0 10px; } .rule p { margin:7px 0; overflow-wrap:anywhere; }
+    .notice { padding:14px; border-radius:10px; background:#f1f6fb; color:#315b8c; }
+    .error { padding:14px; border-radius:10px; background:#fff7f7; color:#b91c1c; }
+    pre { overflow:auto; max-height:540px; padding:14px; border-radius:9px; background:#172033; color:#edf4ff; white-space:pre-wrap; overflow-wrap:anywhere; }
+    details { margin-top:18px; } summary { cursor:pointer; font-weight:650; }
+    button { margin-top:22px; border:0; border-radius:8px; padding:11px 22px; background:#172033; color:white; font:inherit; cursor:pointer; }
+    button:focus-visible, a:focus-visible, summary:focus-visible { outline:3px solid #93c5fd; outline-offset:2px; }
+    @media(max-width:720px) { .topbar { padding:0 18px; } main { width:calc(100% - 24px); } }
+  </style>
+</head>
+<body data-run-id="{{ review_run.run_id }}" data-stage="{{ review_run.progress.stage }}">
+  <header class="topbar"><strong>合同风险审阅 · 规则预览</strong><a href="/contracts/{{ selected_contract.contract_id }}/review">返回风险评估</a></header>
+  <main>
+    <h1>规则解析结果</h1>
+    <p class="muted">{{ selected_contract.filename }}</p>
+    <section class="card">
+      {% if review_run.progress.stage == 'rules_ready' %}
+        <p class="notice">已解析 {{ review_run.parsed_review_items|length }} 个审查项。点击继续后开始合同证据检索和风险判断。</p>
+        {% for item in review_run.parsed_review_items %}
+          <article class="rule">
+            <h2>{{ loop.index }}. {{ item.name }}</h2>
+            <p><strong>规则 ID：</strong>{{ item.id }}</p>
+            <p><strong>规则依据：</strong>{{ item.rule_basis }}</p>
+            <p><strong>审查目标：</strong>{{ item.review_goal }}</p>
+            <p><strong>检索问题：</strong>{{ item.retrieval_query }}</p>
+          </article>
+        {% endfor %}
+        <details><summary>查看完整规则 JSON</summary><pre>{{ review_run.parsed_review_items|tojson(indent=2) }}</pre></details>
+        <form action="/contracts/{{ selected_contract.contract_id }}/review/runs/{{ review_run.run_id }}/continue" method="post">
+          <button type="submit">继续</button>
+        </form>
+      {% elif review_run.status == 'failed' %}
+        <p class="error" role="alert">{{ review_run.error_message }}</p>
+      {% else %}
+        <p class="notice" id="progress-message">{{ review_run.progress.message or '正在解析审查规范' }}</p>
+      {% endif %}
+    </section>
+  </main>
+  <script>
+    const stage = document.body.dataset.stage;
+    if (stage !== 'rules_ready' && stage !== 'failed') {
+      const runId = encodeURIComponent(document.body.dataset.runId);
+      const contractId = encodeURIComponent('{{ selected_contract.contract_id }}');
+      async function poll() {
+        try {
+          const response = await fetch(`/api/contracts/${contractId}/review/runs/${runId}`, { cache: 'no-store' });
+          if (!response.ok) return;
+          const run = await response.json();
+          if (run.progress?.stage === 'rules_ready' || run.status === 'failed') {
+            window.location.reload();
+          } else if (run.status === 'ready' || run.progress?.stage === 'reviewing') {
+            window.location.href = `/contracts/${contractId}/review?run_id=${runId}`;
+          } else {
+            const message = document.querySelector('#progress-message');
+            if (message && run.progress?.message) message.textContent = run.progress.message;
+            window.setTimeout(poll, 2000);
+          }
+        } catch (error) {
+          window.setTimeout(poll, 3000);
+        }
+      }
+      window.setTimeout(poll, 1000);
+    }
+  </script>
+</body>
+</html>

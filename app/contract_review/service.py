@@ -58,11 +58,41 @@ class ContractReviewService:
             progress_callback=progress_callback,
         )
         self.graph = build_contract_review_graph(self.nodes)
+        self.preparsed_graph = build_contract_review_graph(
+            self.nodes, skip_rule_parse=True
+        )
+
+    def parse_rules(self, review_rule_text: str) -> list[dict[str, Any]]:
+        text = review_rule_text.strip()
+        if not text:
+            raise ValueError("review_rule_text must not be empty")
+        parsed = self.nodes.parse_review_rules({"review_rule_text": text})
+        return [item.model_dump(mode="json") for item in parsed["review_items"]]
+
+    def run_preparsed(
+        self,
+        contract_id: str,
+        review_rule_text: str,
+        review_items: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        items = ReviewItemList.model_validate(
+            {"review_items": review_items}
+        ).review_items
+        return self._run(contract_id, review_rule_text, items=items)
 
     def run(
         self,
         contract_id: str,
         review_rule_text: str,
+    ) -> dict[str, Any]:
+        return self._run(contract_id, review_rule_text)
+
+    def _run(
+        self,
+        contract_id: str,
+        review_rule_text: str,
+        *,
+        items: list[Any] | None = None,
     ) -> dict[str, Any]:
         contract_id = contract_id.strip()
         review_rule_text = review_rule_text.strip()
@@ -77,11 +107,13 @@ class ContractReviewService:
         if contract.status != "ready":
             raise ContractNotReadyError(contract)
 
-        final_state = self.graph.invoke(
+        final_state = (
+            self.preparsed_graph if items is not None else self.graph
+        ).invoke(
             {
                 "contract_id": contract_id,
                 "review_rule_text": review_rule_text,
-                "review_items": [],
+                "review_items": items if items is not None else [],
                 "current_item_index": 0,
                 "review_results": [],
                 "summary": None,

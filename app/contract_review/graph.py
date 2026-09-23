@@ -24,7 +24,9 @@ def route_after_finalize(state: ContractReviewState) -> str:
     return "aggregate_results"
 
 
-def build_contract_review_graph(nodes: ContractReviewNodes) -> Any:
+def build_contract_review_graph(
+    nodes: ContractReviewNodes, *, skip_rule_parse: bool = False
+) -> Any:
     builder = StateGraph(ContractReviewState)
     builder.add_node("parse_review_rules", nodes.parse_review_rules)
     builder.add_node("prepare_review_item", nodes.prepare_review_item)
@@ -33,8 +35,11 @@ def build_contract_review_graph(nodes: ContractReviewNodes) -> Any:
     builder.add_node("insufficient_result", nodes.insufficient_result)
     builder.add_node("finalize_review_item", nodes.finalize_review_item)
     builder.add_node("aggregate_results", nodes.aggregate_results)
-    builder.add_edge(START, "parse_review_rules")
-    builder.add_edge("parse_review_rules", "prepare_review_item")
+    if skip_rule_parse:
+        builder.add_edge(START, "prepare_review_item")
+    else:
+        builder.add_edge(START, "parse_review_rules")
+        builder.add_edge("parse_review_rules", "prepare_review_item")
     builder.add_edge("prepare_review_item", "retrieve_evidence")
     builder.add_conditional_edges(
         "retrieve_evidence",

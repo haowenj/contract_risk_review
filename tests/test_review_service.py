@@ -50,18 +50,20 @@ class FakeContractReviewService:
         self.progress_callback = progress_callback
         self.failure = failure
 
-    def run(self, contract_id, review_rule_text):
-        if self.failure is not None:
-            raise self.failure
+    def parse_rules(self, review_rule_text):
+        items = [
+            {"id": "item_1", "name": "付款期限"},
+            {"id": "item_2", "name": "分包转包限制"},
+        ]
         self.progress_callback(
             "review_items_parsed",
-            {
-                "review_items": [
-                    {"id": "item_1", "name": "付款期限"},
-                    {"id": "item_2", "name": "分包转包限制"},
-                ]
-            },
+            {"review_items": items},
         )
+        return items
+
+    def run_preparsed(self, contract_id, review_rule_text, review_items):
+        if self.failure is not None:
+            raise self.failure
         self.progress_callback(
             "review_item_started",
             {
@@ -191,11 +193,15 @@ def test_second_retrieval_success_writes_only_compact_diagnostics():
             def __init__(self, progress_callback):
                 self.progress_callback = progress_callback
 
-            def run(self, contract_id, review_rule_text):
+            def parse_rules(self, review_rule_text):
+                items = [{"id": "item_1", "name": "分包转包限制"}]
                 self.progress_callback(
                     "review_items_parsed",
-                    {"review_items": [{"id": "item_1", "name": "分包转包限制"}]},
+                    {"review_items": items},
                 )
+                return items
+
+            def run_preparsed(self, contract_id, review_rule_text, review_items):
                 self.progress_callback(
                     "review_item_started",
                     {
@@ -256,7 +262,10 @@ def test_second_retrieval_success_writes_only_compact_diagnostics():
         )
         run = service.create_run("c1", "审查规范")
 
-        completed = service.execute_run(run.run_id)
+        paused = service.execute_run(run.run_id)
+        assert paused.progress["stage"] == "rules_ready"
+        service.claim_continue_run("c1", run.run_id)
+        completed = service.execute_review(run.run_id)
         run_dir = root / "review_runs" / run.run_id
         events = read_json_lines(run_dir / "events.jsonl")
         persisted_result = json.loads((run_dir / "result.json").read_text())
@@ -428,11 +437,15 @@ def test_background_failure_flushes_current_item_and_writes_failure_details():
             def __init__(self, progress_callback):
                 self.progress_callback = progress_callback
 
-            def run(self, contract_id, review_rule_text):
+            def parse_rules(self, review_rule_text):
+                items = [{"id": "item_1", "name": "付款期限"}]
                 self.progress_callback(
                     "review_items_parsed",
-                    {"review_items": [{"id": "item_1", "name": "付款期限"}]},
+                    {"review_items": items},
                 )
+                return items
+
+            def run_preparsed(self, contract_id, review_rule_text, review_items):
                 self.progress_callback(
                     "review_item_started",
                     {
@@ -461,7 +474,9 @@ def test_background_failure_flushes_current_item_and_writes_failure_details():
         )
         run = service.create_run("c1", "审查规范")
 
-        completed = service.execute_run(run.run_id)
+        service.execute_run(run.run_id)
+        service.claim_continue_run("c1", run.run_id)
+        completed = service.execute_review(run.run_id)
         run_dir = root / "review_runs" / run.run_id
         events = read_json_lines(run_dir / "events.jsonl")
         failure = json.loads((run_dir / "failure.json").read_text())
@@ -538,7 +553,9 @@ def test_diagnostic_write_failure_does_not_change_review_result():
         )
         run = service.create_run("c1", "审查规范")
 
-        completed = service.execute_run(run.run_id)
+        service.execute_run(run.run_id)
+        service.claim_continue_run("c1", run.run_id)
+        completed = service.execute_review(run.run_id)
         loaded = repository.get_run(run.run_id)
 
     assert completed.status == "ready"
@@ -551,8 +568,11 @@ def test_background_success_reuses_contract_service_and_persists_safe_progress()
         service, contracts, repository, factory_calls = build_service(Path(temp_dir))
         run = service.create_run("c1", "  审查规范  ")
 
-        completed = service.execute_run(run.run_id)
-        duplicate = service.execute_run(run.run_id)
+        paused = service.execute_run(run.run_id)
+        assert paused.progress["stage"] == "rules_ready"
+        service.claim_continue_run("c1", run.run_id)
+        completed = service.execute_review(run.run_id)
+        duplicate = service.execute_review(run.run_id)
         payload = service.get_run_payload("c1", run.run_id)
 
     assert completed.status == "ready"
@@ -571,7 +591,7 @@ def test_background_success_reuses_contract_service_and_persists_safe_progress()
         },
     ]
     assert "review_rule_text" not in payload
-    assert factory_calls == [contracts]
+    assert factory_calls == [contracts, contracts]
     assert [value["message"] for value in repository.progress_updates] == [
         "正在解析审查规范",
         "已解析 2 个审查项",
@@ -595,14 +615,16 @@ def test_background_failure_marks_run_failed_without_raising_to_caller():
         )
         run = service.create_run("c1", "审查规范")
 
-        completed = service.execute_run(run.run_id)
+        service.execute_run(run.run_id)
+        service.claim_continue_run("c1", run.run_id)
+        completed = service.execute_review(run.run_id)
         loaded = repository.get_run(run.run_id)
         payload = service.get_run_payload("c1", run.run_id)
 
     assert completed.status == "failed"
     assert loaded.error_message == "review model unavailable"
     assert payload["error_message"] == "风险审查执行失败，请查看服务日志。"
-    assert loaded.result == {}
+    assert len(loaded.result["review_items"]) == 2
 
 
 def test_create_run_rejects_contract_that_is_not_ready_and_blank_rule():

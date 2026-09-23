@@ -166,6 +166,50 @@ class ContractReviewRepository:
                 raise ReviewRunTransitionError(run_id)
         return self.get_run(run_id)  # type: ignore[return-value]
 
+    def mark_rules_ready(
+        self, run_id: str, review_items: list[dict[str, Any]]
+    ) -> ContractReviewRun:
+        progress = {
+            "stage": "rules_ready",
+            "message": f"已解析 {len(review_items)} 个审查项，等待继续",
+            "total": len(review_items),
+        }
+        with self._write_lock, self._connection() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE review_runs
+                SET result_json = ?, progress_json = ?
+                WHERE run_id = ? AND status = 'processing'
+                  AND json_extract(progress_json, '$.stage')
+                      IN ('parsing_rules', 'rules_parsed')
+                """,
+                (
+                    json.dumps({"review_items": review_items}, ensure_ascii=False),
+                    json.dumps(progress, ensure_ascii=False),
+                    run_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ReviewRunTransitionError(run_id)
+        return self.get_run(run_id)  # type: ignore[return-value]
+
+    def mark_reviewing(
+        self, run_id: str, progress: dict[str, Any]
+    ) -> ContractReviewRun:
+        with self._write_lock, self._connection() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE review_runs
+                SET progress_json = ?
+                WHERE run_id = ? AND status = 'processing'
+                  AND json_extract(progress_json, '$.stage') = 'rules_ready'
+                """,
+                (json.dumps(progress, ensure_ascii=False), run_id),
+            )
+            if cursor.rowcount != 1:
+                raise ReviewRunTransitionError(run_id)
+        return self.get_run(run_id)  # type: ignore[return-value]
+
     def mark_ready(
         self,
         run_id: str,
@@ -227,7 +271,9 @@ class ContractReviewRepository:
                 UPDATE review_runs
                 SET status = 'failed', progress_json = ?, completed_at = ?,
                     error_message = ?
-                WHERE status IN ('queued', 'processing')
+                WHERE status = 'queued'
+                   OR (status = 'processing'
+                       AND json_extract(progress_json, '$.stage') != 'rules_ready')
                 """,
                 (
                     json.dumps(progress, ensure_ascii=False),

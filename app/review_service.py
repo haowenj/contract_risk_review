@@ -61,6 +61,8 @@ def _business_result_payload(result: dict[str, Any]) -> dict[str, Any]:
         "candidate_count",
     }
     raw_results = result.get("review_results", [])
+    if summary is None and "review_results" not in result:
+        return {}
     if isinstance(raw_results, list):
         for raw_result in raw_results:
             if not isinstance(raw_result, dict):
@@ -228,7 +230,65 @@ class ContractReviewWebService:
                 contract_service=self.contract_service,
                 progress_callback=progress_callback,
             )
-            result = review_service.run(run.contract_id, run.review_rule_text)
+            review_items = review_service.parse_rules(run.review_rule_text)
+            return self.review_repository.mark_rules_ready(run_id, review_items)
+        except Exception as exc:
+            if journal is not None:
+                journal.failed(exc)
+            logger.exception("contract review rule parsing failed: %s", run_id)
+            try:
+                return self.review_repository.mark_failed(run_id, str(exc))
+            except ReviewRunTransitionError:
+                current = self.review_repository.get_run(run_id)
+                if current is None:
+                    raise KeyError(run_id) from exc
+                return current
+
+    def claim_continue_run(
+        self, contract_id: str, run_id: str
+    ) -> ContractReviewRun:
+        run = self.review_repository.get_run(run_id)
+        if run is None or run.contract_id != contract_id:
+            raise KeyError(run_id)
+        return self.review_repository.mark_reviewing(
+            run_id,
+            {
+                "stage": "reviewing",
+                "message": "正在开始合同审查",
+                "total": len(run.result.get("review_items", [])),
+            },
+        )
+
+    def execute_review(self, run_id: str) -> ContractReviewRun:
+        run = self.review_repository.get_run(run_id)
+        if run is None:
+            raise KeyError(run_id)
+        if run.status != "processing" or run.progress.get("stage") != "reviewing":
+            return run
+
+        journal: ReviewRunJournal | None = None
+        try:
+            review_items = run.result["review_items"]
+            tracker = _BusinessProgressTracker(self.review_repository, run_id)
+            tracker.total = len(review_items)
+            journal = (
+                ReviewRunJournal(self.review_runs_dir, run_id)
+                if self.review_runs_dir is not None
+                else None
+            )
+
+            def progress_callback(event: str, payload: dict[str, Any]) -> None:
+                if journal is not None:
+                    journal.record(event, payload)
+                tracker(event, payload)
+
+            review_service = self.review_service_factory(
+                contract_service=self.contract_service,
+                progress_callback=progress_callback,
+            )
+            result = review_service.run_preparsed(
+                run.contract_id, run.review_rule_text, review_items
+            )
             summary = result.get("summary") or {}
             total = int(summary.get("total_items", tracker.total))
             completed_run = self.review_repository.mark_ready(
@@ -269,6 +329,11 @@ class ContractReviewWebService:
             "contract_id": run.contract_id,
             "status": run.status,
             "result": _business_result_payload(run.result),
+            "parsed_review_items": (
+                run.result.get("review_items", [])
+                if run.progress.get("stage") == "rules_ready"
+                else None
+            ),
             "progress": run.progress,
             "created_at": run.created_at,
             "started_at": run.started_at,
