@@ -32,6 +32,10 @@ from app.evaluation_service import (
     EvaluationRetrievalContextNotFoundError,
     EvaluationStaleError,
 )
+from app.evidence_review.presentation import (
+    identifier_label,
+    summarize_evidence_statuses,
+)
 from app.evidence_review.repository import (
     DecisionConflictError,
     EvidenceReviewRepository,
@@ -249,6 +253,12 @@ def create_app(
                 "error": error,
                 "decision_item_id": decision_item_id,
                 "decision_input": decision_input or {},
+                "evidence_summary": summarize_evidence_statuses(
+                    run_payload["items"]
+                    if run_payload and run_payload["status"] == "ready"
+                    else []
+                ),
+                "identifier_label": identifier_label,
             },
         )
 

@@ -14,6 +14,7 @@ os.environ.setdefault("LLM_MODEL", "test-model")
 from app.api import create_app
 from app.config import Settings
 from app.db import ContractRepository
+from app.evidence_review.presentation import summarize_evidence_statuses
 from app.evidence_review.repository import EvidenceReviewRepository
 from app.evidence_review.schemas import EvidencePackage, ResearchPackage
 from app.evidence_review.web_service import EvidenceReviewWebService
@@ -260,16 +261,14 @@ def test_ready_page_displays_evidence_facts_missing_sources_and_research(
         "核验相对方企业状态",
         "乙方：示例工程有限公司",
         "第 5 页",
-        "来源对象 12",
         "相对方公司名称",
         "示例工程有限公司",
-        "company",
         "企业登记状态",
         "主体名称及存续状态",
-        "关键信息缺失",
-        "credit_code",
+        "查询前还缺",
+        "统一社会信用代码",
         "项目内部立项审批记录",
-        "未找到不等于合同没有约定，请人工核对全文及附件",
+        "这不代表合同没有约定，请人工查阅全文和附件",
     ]:
         assert text in response.text
     for forbidden in ["risk_status", "风险说明", "修改建议"]:
@@ -277,6 +276,45 @@ def test_ready_page_displays_evidence_facts_missing_sources_and_research(
     assert 'id="evidence-status-filter"' in response.text
     assert 'id="research-status-filter"' in response.text
     assert 'id="human-status-filter"' in response.text
+
+
+def test_result_page_explains_provisional_evidence_and_collapses_details(tmp_path: Path):
+    client, _, rule_set = build_client(tmp_path)
+    created = client.post(
+        "/contracts/c1/evidence-review/runs",
+        data={"rule_set_id": rule_set.rule_set_id},
+        follow_redirects=False,
+    )
+    run_id = parse_qs(urlparse(created.headers["location"]).query)["run_id"][0]
+
+    page = client.get(f"/contracts/c1/evidence-review?run_id={run_id}")
+
+    assert page.status_code == 200
+    assert "取证结果" in page.text
+    assert "候选合同片段" in page.text
+    assert "不能直接作为风险结论" in page.text
+    assert "取证失败" in page.text
+    assert '<details class="source-details"' in page.text
+    assert '<details class="decision-details"' in page.text
+    assert "统一社会信用代码" in page.text
+    assert "credit_code" not in page.text
+    assert "来源对象 12" not in page.text
+
+
+def test_status_summary_includes_failed_items():
+    entries = [
+        {"evidence_package": {"evidence_status": status}}
+        for status in ["found", "not_found", "source_missing", "extraction_failed"]
+    ]
+
+    summary = summarize_evidence_statuses(entries)
+
+    assert summary == {
+        "found": 1,
+        "not_found": 1,
+        "source_missing": 1,
+        "extraction_failed": 1,
+    }
 
 
 def test_status_api_is_pollable_and_cross_contract_is_hidden(tmp_path: Path):
@@ -404,6 +442,7 @@ def test_invalid_decision_preserves_input_and_stale_route_returns_409(
     assert invalid.status_code == 400
     assert "这段输入必须保留" in invalid.text
     assert "外部或内部查询尚未完成" in invalid.text
+    assert '<details class="decision-details" open>' in invalid.text
 
     valid_data = {
         "decision": "cannot_determine",
