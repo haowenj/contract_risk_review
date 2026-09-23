@@ -49,6 +49,10 @@ class ServerRenderedPageTest(TestCase):
             self.assertNotIn('name="question"', response.text)
             self.assertNotIn("请选择一份合同", response.text)
             self.assertIn('data-poll-interval="10000"', response.text)
+            self.assertNotIn(
+                f'data-delete-contract-id="{contract.contract_id}"',
+                response.text,
+            )
 
     def test_ready_contract_shows_rule_selection_without_test_entries(self):
         with TemporaryDirectory() as temp_dir:
@@ -82,6 +86,11 @@ class ServerRenderedPageTest(TestCase):
             self.assertNotIn("召回测试", home_response.text)
             self.assertNotIn("实验性自动判断", home_response.text)
             self.assertIn("重新解析", home_response.text)
+            self.assertIn(
+                f'data-delete-contract-id="{contract.contract_id}"',
+                home_response.text,
+            )
+            self.assertIn("删除合同", home_response.text)
             self.assertIn(">已就绪<", home_response.text)
             self.assertNotIn("可问答", home_response.text)
             self.assertEqual(legacy_page_response.status_code, 404)
@@ -113,5 +122,9 @@ class ServerRenderedPageTest(TestCase):
         self.assertNotIn("重试", response.text)
         self.assertIn(
             f'data-reprocess-contract-id="{contract.contract_id}"',
+            response.text,
+        )
+        self.assertIn(
+            f'data-delete-contract-id="{contract.contract_id}"',
             response.text,
         )

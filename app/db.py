@@ -14,6 +14,10 @@ from app.models import ContractRecord
 CONTRACT_STATUSES = frozenset({"queued", "processing", "ready", "failed"})
 
 
+class ContractDeletionNotAllowedError(RuntimeError):
+    pass
+
+
 class ContractRepository:
     def __init__(self, database_path: Path):
         self.database_path = Path(database_path).expanduser()
@@ -134,6 +138,56 @@ class ContractRepository:
                 "SELECT * FROM contracts ORDER BY sequence DESC"
             ).fetchall()
         return [record for row in rows if (record := self._record_from_row(row))]
+
+    def delete_finished(self, contract_id: str) -> ContractRecord:
+        with self._write_lock, self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM contracts WHERE contract_id = ?",
+                (contract_id,),
+            ).fetchone()
+            record = self._record_from_row(row)
+            if record is None:
+                raise KeyError(contract_id)
+            if record.status not in {"ready", "failed"}:
+                raise ContractDeletionNotAllowedError(
+                    "合同仍在解析，完成后才能删除。"
+                )
+
+            existing_tables = {
+                table["name"]
+                for table in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            for table_name in (
+                "evidence_review_runs",
+                "review_runs",
+                "evaluation_runs",
+            ):
+                if table_name not in existing_tables:
+                    continue
+                active = connection.execute(
+                    f"SELECT 1 FROM {table_name} "
+                    "WHERE contract_id = ? AND status IN ('queued', 'processing') "
+                    "LIMIT 1",
+                    (contract_id,),
+                ).fetchone()
+                if active:
+                    raise ContractDeletionNotAllowedError(
+                        "该合同仍有校验任务在处理，完成后才能删除。"
+                    )
+
+            if "evidence_review_runs" in existing_tables:
+                connection.execute(
+                    "DELETE FROM evidence_review_runs WHERE contract_id = ?",
+                    (contract_id,),
+                )
+            connection.execute(
+                "DELETE FROM contracts WHERE contract_id = ?",
+                (contract_id,),
+            )
+        return record
 
     def update_status(
         self,

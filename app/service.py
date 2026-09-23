@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import shutil
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from app.config import Settings
-from app.db import ContractRepository
+from app.db import ContractDeletionNotAllowedError, ContractRepository
 from app.evaluation_db import EvaluationRepository
 from app.evaluation_service import EvaluationService
 from app.evidence_serialization import serialize_node_result
@@ -71,8 +73,6 @@ class ContractService:
         return self.repository.create(filename, storage_dir, contract_id=contract_id)
 
     def _new_contract_id(self) -> str:
-        import uuid
-
         return str(uuid.uuid4())
 
     def get_contract(self, contract_id: str) -> ContractRecord | None:
@@ -80,6 +80,41 @@ class ContractService:
 
     def list_contracts(self) -> list[ContractRecord]:
         return self.repository.list()
+
+    def delete_contract(self, contract_id: str) -> None:
+        contract = self.repository.get(contract_id)
+        if contract is None:
+            raise ContractNotFoundError(contract_id)
+        if contract.status not in {"ready", "failed"}:
+            raise ContractDeletionNotAllowedError(
+                "合同仍在解析，完成后才能删除。"
+            )
+
+        root = Path(self.settings.contracts_dir).resolve()
+        storage_dir = Path(contract.storage_dir).resolve()
+        if storage_dir.parent != root or storage_dir.name != contract_id:
+            raise ContractDeletionNotAllowedError(
+                "合同存储位置不符合预期，无法安全删除。"
+            )
+        if storage_dir.exists() and not storage_dir.is_dir():
+            raise ContractDeletionNotAllowedError(
+                "合同存储位置不符合预期，无法安全删除。"
+            )
+
+        staged_dir = None
+        if storage_dir.exists():
+            staged_dir = root / f".deleting-{contract_id}-{uuid.uuid4().hex}"
+            storage_dir.rename(staged_dir)
+        try:
+            self.repository.delete_finished(contract_id)
+        except Exception:
+            if staged_dir is not None:
+                staged_dir.rename(storage_dir)
+            raise
+
+        self.index_manager.clear(contract_id)
+        if staged_dir is not None:
+            shutil.rmtree(staged_dir)
 
     def reprocess_contract(self, contract_id: str, mode: str) -> ContractRecord:
         if mode not in {"reuse_existing", "from_scratch"}:

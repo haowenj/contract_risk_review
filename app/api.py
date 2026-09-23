@@ -20,7 +20,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from app.config import Settings, load_settings
-from app.db import ContractRepository
+from app.db import ContractDeletionNotAllowedError, ContractRepository
 from app.evaluation_forms import format_expected_indices, parse_expected_indices
 from app.evaluation_service import (
     EvaluationCaseNotFoundError,
@@ -601,6 +601,16 @@ def create_app(
         if record is None:
             raise HTTPException(status_code=404, detail="contract not found")
         return _record_payload(record)
+
+    @application.delete("/api/contracts/{contract_id}", status_code=204)
+    def delete_contract(contract_id: str) -> Response:
+        try:
+            active_service.delete_contract(contract_id)
+        except ContractNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="contract not found") from exc
+        except ContractDeletionNotAllowedError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return Response(status_code=204)
 
     @application.get("/contracts/{contract_id}/images/{img_path:path}")
     def contract_image(contract_id: str, img_path: str) -> FileResponse:

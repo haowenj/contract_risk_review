@@ -43,6 +43,8 @@
     }
 
     button:disabled { cursor: not-allowed; opacity: .65; }
+    button.danger-outline { border-color:#e6b8b3; color:#a8372f; background:#fff; }
+    button.danger { border-color:#a8372f; background:#a8372f; color:#fff; }
 
     .topbar {
       min-height: 64px;
@@ -338,9 +340,11 @@
             {% if contract.status == "ready" %}
               <a class="button primary" href="/contracts/{{ contract.contract_id }}/evidence-review">选择规则并校验</a>
               <button type="button" data-reprocess-contract-id="{{ contract.contract_id }}">重新解析</button>
+              <button class="danger-outline" type="button" data-delete-contract-id="{{ contract.contract_id }}" data-delete-contract-name="{{ contract.filename }}">删除</button>
             {% elif contract.status == "failed" %}
               <button type="button" data-reprocess-contract-id="{{ contract.contract_id }}">重新解析</button>
               <button type="button" data-error-message="{{ contract.error_message or '入库失败，请查看服务日志。' }}">错误详情</button>
+              <button class="danger-outline" type="button" data-delete-contract-id="{{ contract.contract_id }}" data-delete-contract-name="{{ contract.filename }}">删除</button>
             {% else %}
               <button type="button" disabled>{{ contract.status|status_label }}</button>
             {% endif %}
@@ -355,11 +359,25 @@
   <dialog id="error-dialog" aria-labelledby="error-title">
     <div class="modal">
       <header>
-        <h2 id="error-title">入库失败</h2>
+        <h2 id="error-title">操作未完成</h2>
         <button id="close-error" class="close" type="button" aria-label="关闭">×</button>
       </header>
       <p id="error-message" class="error"></p>
       <footer><button id="dismiss-error" class="primary" type="button">知道了</button></footer>
+    </div>
+  </dialog>
+
+  <dialog id="delete-dialog" aria-labelledby="delete-title">
+    <div class="modal">
+      <header>
+        <h2 id="delete-title">删除合同</h2>
+        <button id="close-delete" class="close" type="button" aria-label="关闭">×</button>
+      </header>
+      <p>确定删除 <strong id="delete-contract-name"></strong> 吗？原文件、解析结果、索引和该合同的校验记录将一并删除，无法恢复。</p>
+      <footer>
+        <button id="cancel-delete" type="button">取消</button>
+        <button id="confirm-delete" class="danger" type="button">确认删除</button>
+      </footer>
     </div>
   </dialog>
 
@@ -399,7 +417,11 @@
     const reprocessDialog = document.querySelector('#reprocess-dialog');
     const reprocessForm = document.querySelector('#reprocess-form');
     const startReprocess = document.querySelector('#start-reprocess');
+    const deleteDialog = document.querySelector('#delete-dialog');
+    const deleteContractName = document.querySelector('#delete-contract-name');
+    const confirmDelete = document.querySelector('#confirm-delete');
     let reprocessContractId = '';
+    let deleteContractId = '';
 
     const statusLabels = {
       queued: '排队中',
@@ -416,7 +438,7 @@
 
     function createButton(
       label,
-      { disabled = false, error = '', reprocessContractId = '' } = {},
+      { disabled = false, error = '', reprocessContractId = '', deleteContractId = '', deleteContractName = '' } = {},
     ) {
       const button = document.createElement('button');
       button.type = 'button';
@@ -424,6 +446,11 @@
       button.disabled = disabled;
       if (error) button.dataset.errorMessage = error;
       if (reprocessContractId) button.dataset.reprocessContractId = reprocessContractId;
+      if (deleteContractId) {
+        button.className = 'danger-outline';
+        button.dataset.deleteContractId = deleteContractId;
+        button.dataset.deleteContractName = deleteContractName;
+      }
       return button;
     }
 
@@ -473,6 +500,10 @@
           '重新解析',
           { reprocessContractId: contract.contract_id },
         ));
+        actions.append(createButton('删除', {
+          deleteContractId: contract.contract_id,
+          deleteContractName: contract.filename,
+        }));
       } else if (contract.status === 'failed') {
         actions.append(createButton(
           '重新解析',
@@ -482,6 +513,10 @@
           '错误详情',
           { error: contract.error_message || '入库失败，请查看服务日志。' },
         ));
+        actions.append(createButton('删除', {
+          deleteContractId: contract.contract_id,
+          deleteContractName: contract.filename,
+        }));
       } else {
         actions.append(createButton(statusLabels[contract.status] || '处理中', { disabled: true }));
       }
@@ -523,6 +558,38 @@
       reprocessDialog.showModal();
     }
 
+    function openDeleteDialog(button) {
+      deleteContractId = button.dataset.deleteContractId;
+      deleteContractName.textContent = button.dataset.deleteContractName || '该合同';
+      deleteDialog.showModal();
+    }
+
+    async function submitDelete() {
+      if (!deleteContractId) return;
+      confirmDelete.disabled = true;
+      confirmDelete.textContent = '删除中…';
+      try {
+        const response = await fetch(
+          `/api/contracts/${encodeURIComponent(deleteContractId)}`,
+          { method: 'DELETE' },
+        );
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload.detail || '删除失败，请稍后再试。');
+        }
+        deleteDialog.close();
+        deleteContractId = '';
+        await refreshContracts();
+      } catch (error) {
+        deleteDialog.close();
+        errorMessage.textContent = error.message || '删除失败，请稍后再试。';
+        errorDialog.showModal();
+      } finally {
+        confirmDelete.disabled = false;
+        confirmDelete.textContent = '确认删除';
+      }
+    }
+
     async function submitReprocess(event) {
       event.preventDefault();
       if (!reprocessContractId) return;
@@ -557,6 +624,11 @@
     }
 
     contractList.addEventListener('click', async (event) => {
+      const deleteButton = event.target.closest('[data-delete-contract-id]');
+      if (deleteButton) {
+        openDeleteDialog(deleteButton);
+        return;
+      }
       const reprocessButton = event.target.closest('[data-reprocess-contract-id]');
       if (reprocessButton) {
         openReprocessDialog(reprocessButton);
@@ -573,6 +645,9 @@
     document.querySelector('#close-reprocess').addEventListener('click', () => reprocessDialog.close());
     document.querySelector('#cancel-reprocess').addEventListener('click', () => reprocessDialog.close());
     reprocessForm.addEventListener('submit', submitReprocess);
+    document.querySelector('#close-delete').addEventListener('click', () => deleteDialog.close());
+    document.querySelector('#cancel-delete').addEventListener('click', () => deleteDialog.close());
+    confirmDelete.addEventListener('click', submitDelete);
 
     function submitFile(file) {
       if (!file) return;
