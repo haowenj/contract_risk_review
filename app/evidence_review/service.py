@@ -8,13 +8,6 @@ from typing import Any
 from langchain_openai import ChatOpenAI
 from pydantic import model_validator
 
-from app.contract_review.prompts import build_review_item_prompt
-from app.contract_review.schemas import (
-    Evidence as ReviewEvidence,
-    ReviewItem,
-    RiskDecision,
-    parse_llm_response,
-)
 from app.evidence_review.prompts import build_fact_extraction_prompt
 from app.evidence_review.schemas import (
     Evidence,
@@ -52,26 +45,6 @@ def build_fact_extraction_llm() -> Any:
             "name": "contract_evidence_fact_extraction",
             "strict": True,
             "schema": FactExtractionResult.model_json_schema(),
-        },
-    }
-    return ChatOpenAI(
-        model=os.environ["LLM_MODEL"],
-        api_key=os.environ["LLM_API_KEY"],
-        base_url=os.environ["LLM_BASE_URL"],
-        temperature=0,
-        timeout=FACT_EXTRACTION_TIMEOUT_SECONDS,
-        max_retries=0,
-        reasoning_effort="none",
-    ).bind(response_format=response_format)
-
-
-def build_risk_suggestion_llm() -> Any:
-    response_format = {
-        "type": "json_schema",
-        "json_schema": {
-            "name": "contract_rule_risk_suggestion",
-            "strict": True,
-            "schema": RiskDecision.model_json_schema(),
         },
     }
     return ChatOpenAI(
@@ -147,55 +120,9 @@ def _is_sensitive_fact(fact_key: str, label: str) -> bool:
 
 
 class EvidenceReviewService:
-    def __init__(
-        self,
-        *,
-        contract_service: Any,
-        fact_llm: Any,
-        review_llm: Any | None = None,
-    ):
+    def __init__(self, *, contract_service: Any, fact_llm: Any):
         self.contract_service = contract_service
         self.fact_llm = fact_llm
-        self.review_llm = review_llm
-
-    def suggest_item(
-        self,
-        item: RuleItem,
-        package: EvidencePackage,
-    ) -> RiskDecision | None:
-        if (
-            self.review_llm is None
-            or package.evidence_status != "found"
-            or package.missing_sources
-            or package.research_package is not None
-        ):
-            return None
-        try:
-            review_item = ReviewItem(
-                id=item.item_id,
-                name=item.name,
-                rule_basis=item.rule_text,
-                review_goal=item.name,
-                retrieval_query=item.retrieval_queries[0],
-            )
-            evidence = [
-                ReviewEvidence.model_validate(value.model_dump(mode="json"))
-                for value in package.evidence
-            ]
-            return parse_llm_response(
-                invoke_llm(
-                    self.review_llm,
-                    build_review_item_prompt(review_item, evidence),
-                ),
-                RiskDecision,
-            )
-        except Exception as exc:
-            LOGGER.error(
-                "Risk suggestion failed for item=%s (error_type=%s)",
-                item.item_id,
-                type(exc).__name__,
-            )
-            return None
 
     def extract_item(self, contract_id: str, item: RuleItem) -> EvidencePackage:
         try:
@@ -273,19 +200,16 @@ class EvidenceReviewService:
         else:
             evidence_status = "not_found"
 
-        research_package = self._build_research_package(item, facts)
         # Constructing the package performs the final evidence-index check.
-        package = EvidencePackage(
+        return EvidencePackage(
             rule_item_id=item.item_id,
             evidence_status=evidence_status,
             evidence=evidence,
             extracted_facts=facts,
             missing_sources=missing_sources,
-            research_package=research_package,
+            research_package=self._build_research_package(item, facts),
             item_error=None,
         )
-        suggestion = self.suggest_item(item, package)
-        return package.model_copy(update={"system_suggestion": suggestion})
 
     def _retrieve_evidence(
         self,

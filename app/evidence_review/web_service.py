@@ -15,7 +15,6 @@ from app.evidence_review.schemas import EvidencePackage, HumanDecision, RuleItem
 from app.evidence_review.service import (
     EvidenceReviewService,
     build_fact_extraction_llm,
-    build_risk_suggestion_llm,
 )
 from app.service import ContractNotFoundError, ContractNotReadyError
 
@@ -40,7 +39,6 @@ def build_evidence_review_service(*, contract_service: Any) -> EvidenceReviewSer
     return EvidenceReviewService(
         contract_service=contract_service,
         fact_llm=build_fact_extraction_llm(),
-        review_llm=build_risk_suggestion_llm(),
     )
 
 
@@ -242,93 +240,6 @@ class EvidenceReviewWebService:
             "completed_at": run.completed_at,
             "error_message": run.error_message,
         }
-
-    def _suggestion_candidates(self, run_id: str) -> list[tuple[RuleItem, EvidencePackage]]:
-        decisions = {
-            value.rule_item_id: value.decision
-            for value in self.repository.list_evidence_decisions(run_id)
-        }
-        candidates = []
-        for record in self.repository.list_evidence_items(run_id):
-            package = EvidencePackage.model_validate(record.evidence_package)
-            if (
-                package.evidence_status == "found"
-                and package.system_suggestion is None
-                and not package.missing_sources
-                and package.research_package is None
-                and decisions[record.rule_item_id].human_review_status == "pending"
-            ):
-                candidates.append(
-                    (RuleItem.model_validate(record.rule_snapshot), package)
-                )
-        return candidates
-
-    def count_missing_suggestions(self, contract_id: str, run_id: str) -> int:
-        payload = self.get_run_payload(contract_id, run_id)
-        if payload["status"] != "ready":
-            return 0
-        return len(self._suggestion_candidates(run_id))
-
-    def request_suggestions(self, contract_id: str, run_id: str) -> bool:
-        payload = self.get_run_payload(contract_id, run_id)
-        if payload["status"] != "ready":
-            raise EvidenceRunTransitionError(run_id)
-        candidates = self._suggestion_candidates(run_id)
-        if not candidates:
-            return False
-        return self.repository.claim_suggestion_generation(
-            run_id, total=len(candidates)
-        )
-
-    def generate_missing_suggestions(self, run_id: str) -> None:
-        run = self.repository.get_evidence_run(run_id)
-        if run is None or run.progress.get("suggestion_status") != "processing":
-            return
-        candidates = self._suggestion_candidates(run_id)
-        total = len(candidates)
-        completed = 0
-        generated = 0
-        try:
-            service = self.evidence_service_factory(
-                contract_service=self.contract_service
-            )
-            for item, package in candidates:
-                try:
-                    suggestion = service.suggest_item(item, package)
-                    if suggestion is not None and self.repository.save_system_suggestion(
-                        run_id, item.item_id, suggestion
-                    ):
-                        generated += 1
-                except Exception as exc:
-                    LOGGER.error(
-                        "Saved evidence suggestion failed for item=%s "
-                        "(error_type=%s)",
-                        item.item_id,
-                        type(exc).__name__,
-                    )
-                completed += 1
-                self.repository.update_suggestion_progress(
-                    run_id,
-                    status="processing",
-                    completed=completed,
-                    total=total,
-                )
-            self.repository.update_suggestion_progress(
-                run_id,
-                status="completed" if generated == total else "partial",
-                completed=completed,
-                total=total,
-            )
-        except Exception as exc:
-            LOGGER.error(
-                "Saved evidence suggestion generation failed for run=%s "
-                "(error_type=%s)",
-                run_id,
-                type(exc).__name__,
-            )
-            self.repository.update_suggestion_progress(
-                run_id, status="failed", completed=completed, total=total
-            )
 
     def save_human_decision(
         self,

@@ -180,6 +180,7 @@ class EvidencePackage(StrictModel):
     missing_sources: list[str]
     research_package: ResearchPackage | None
     item_error: str | None
+    # Older saved runs may contain this field; current reviews do not generate or show it.
     system_suggestion: RiskDecision | None = None
 
     @model_validator(mode="after")

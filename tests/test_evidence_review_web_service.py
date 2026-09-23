@@ -122,20 +122,6 @@ class FakeEvidenceService:
         return outputs
 
 
-class SuggestionEvidenceService(FakeEvidenceService):
-    def suggest_item(self, item, package):
-        assert item.item_id == "found"
-        assert package.evidence[0].evidence_text == "付款期限为30日"
-        return {
-            "risk_status": "risk",
-            "risk_level": None,
-            "evidence_status": "found",
-            "finding": "合同约定付款期限为30日",
-            "risk_description": "付款期限需要按规则核对",
-            "suggestion": "核对付款节点",
-        }
-
-
 def active_rule_set(repository: EvidenceReviewRepository, tmp_path: Path):
     source = tmp_path / "rules.md"
     source.write_text("rules", encoding="utf-8")
@@ -187,24 +173,6 @@ def test_run_persists_found_failed_and_research_items_and_reaches_ready(
         "research_status"
     ] == "pending"
     assert len(repository.list_evidence_items(run.run_id)) == 3
-
-
-def test_existing_run_can_generate_suggestions_from_saved_evidence(tmp_path: Path):
-    service, repository, rule_set = build_service(tmp_path)
-    run = service.create_run("c1", rule_set.rule_set_id)
-    service.execute_run(run.run_id)
-    service.evidence_service_factory = lambda **kwargs: SuggestionEvidenceService()
-
-    assert service.request_suggestions("c1", run.run_id)
-    assert not service.request_suggestions("c1", run.run_id)
-    service.generate_missing_suggestions(run.run_id)
-
-    payload = service.get_run_payload("c1", run.run_id)
-    assert payload["progress"]["suggestion_status"] == "completed"
-    assert payload["items"][0]["evidence_package"]["system_suggestion"]["risk_status"] == "risk"
-    assert payload["items"][1]["evidence_package"]["system_suggestion"] is None
-    assert payload["items"][2]["evidence_package"]["system_suggestion"] is None
-    assert payload["items"][0]["human_decision"]["human_review_status"] == "pending"
 
 
 def test_create_run_validates_contract_and_active_rule_set(tmp_path: Path):

@@ -65,17 +65,20 @@ def present_result_item(entry: Mapping) -> dict:
             if value != "规则要求的内部材料尚未提供"
         ]
 
-    suggestion = package.get("system_suggestion") or {}
     evidence = package.get("evidence") or []
+    contract_facts = []
+    for fact in (package.get("extracted_facts") or [])[:3]:
+        value = fact["value"]
+        if len(value) > 120:
+            value = value[:120].rstrip() + "…"
+        unit = f" {fact['unit']}" if fact.get("unit") else ""
+        contract_facts.append(f"{fact['label']}：{value}{unit}")
     first_evidence = evidence[0] if evidence else {}
     contract_page = first_evidence.get("page_idx")
     if contract_page is not None:
         contract_page += 1
 
-    if suggestion.get("finding"):
-        contract_label = "合同情况"
-        contract_text = suggestion["finding"]
-    elif evidence:
+    if evidence:
         contract_label = "合同摘录"
         contract_text = first_evidence["evidence_text"]
         if len(contract_text) > 200:
@@ -119,14 +122,6 @@ def present_result_item(entry: Mapping) -> dict:
         verdict_key, verdict_label, verdict_source = (
             "needs_review", "待查询核实", ""
         )
-    elif suggestion.get("risk_status") == "risk":
-        verdict_key, verdict_label, verdict_source = (
-            "risk", "疑似有风险", "系统建议"
-        )
-    elif suggestion.get("risk_status") == "no_obvious_risk":
-        verdict_key, verdict_label, verdict_source = (
-            "no_obvious_risk", "暂未见明显风险", "系统建议"
-        )
     elif package["evidence_status"] == "not_found":
         verdict_key, verdict_label, verdict_source = (
             "needs_review", "待核对合同", ""
@@ -136,14 +131,14 @@ def present_result_item(entry: Mapping) -> dict:
             "needs_review", "待人工核实", ""
         )
 
-    if online_queries:
-        filter_status = "query"
-    elif missing_materials:
-        filter_status = "materials"
-    elif verdict_key == "risk":
+    if verdict_key == "risk":
         filter_status = "risk"
     elif verdict_key == "no_obvious_risk":
         filter_status = "no_obvious_risk"
+    elif online_queries:
+        filter_status = "query"
+    elif missing_materials:
+        filter_status = "materials"
     else:
         filter_status = "review"
 
@@ -154,6 +149,7 @@ def present_result_item(entry: Mapping) -> dict:
         "verdict_source": verdict_source,
         "contract_label": contract_label,
         "contract_text": contract_text,
+        "contract_facts": contract_facts,
         "contract_page": contract_page,
         "online_queries": online_queries,
         "query_prerequisites": query_prerequisites,

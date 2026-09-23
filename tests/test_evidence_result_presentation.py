@@ -26,7 +26,7 @@ def make_entry(*, evidence_status="found", suggestion=None, decision=None, resea
     }
 
 
-def test_system_suggestion_is_provisional_and_human_decision_takes_priority():
+def test_saved_legacy_suggestion_does_not_replace_a_human_verdict():
     entry = make_entry(suggestion={
         "risk_status": "risk",
         "finding": "延期责任全部由乙方承担",
@@ -35,10 +35,9 @@ def test_system_suggestion_is_provisional_and_human_decision_takes_priority():
 
     proposed = present_result_item(entry)
 
-    assert proposed["verdict_key"] == "risk"
-    assert proposed["verdict_label"] == "疑似有风险"
-    assert proposed["verdict_source"] == "系统建议"
-    assert proposed["contract_text"] == "延期责任全部由乙方承担"
+    assert proposed["verdict_key"] == "needs_review"
+    assert proposed["verdict_label"] == "待人工核实"
+    assert proposed["contract_text"] == "乙方承担全部延期责任"
     assert proposed["contract_page"] == 4
 
     entry["human_decision"] = {
@@ -52,6 +51,18 @@ def test_system_suggestion_is_provisional_and_human_decision_takes_priority():
     assert confirmed["verdict_key"] == "no_obvious_risk"
     assert confirmed["verdict_label"] == "无明显风险"
     assert confirmed["verdict_source"] == "人工结论"
+
+
+def test_extracted_contract_facts_are_shown_without_a_new_model_judgment():
+    entry = make_entry()
+    entry["evidence_package"]["extracted_facts"] = [
+        {"label": "付款期限", "value": "30", "unit": "天"}
+    ]
+
+    result = present_result_item(entry)
+
+    assert result["verdict_key"] == "needs_review"
+    assert result["contract_facts"] == ["付款期限：30 天"]
 
 
 def test_external_query_is_a_todo_not_a_contract_no_risk_result():
@@ -101,9 +112,37 @@ def test_specific_materials_replace_the_generic_missing_material_hint():
     assert result["missing_materials"] == ["项目审批记录"]
 
 
+def test_confirmed_risk_remains_in_risk_filter_when_source_was_missing():
+    entry = make_entry(
+        evidence_status="source_missing",
+        decision={
+            "human_review_status": "completed",
+            "decision": "risk",
+            "opinion": "补充材料后确认有风险",
+            "research_status": "completed",
+        },
+    )
+    entry["evidence_package"]["missing_sources"] = ["项目审批记录"]
+
+    result = present_result_item(entry)
+
+    assert result["verdict_key"] == "risk"
+    assert result["filter_status"] == "risk"
+
+
 def test_result_summary_keeps_query_count_separate_from_verdict_totals():
-    risk = make_entry(suggestion={"risk_status": "risk", "finding": "有风险", "suggestion": "核对"})
-    no_risk = make_entry(suggestion={"risk_status": "no_obvious_risk", "finding": "未见风险", "suggestion": "核对"})
+    risk = make_entry(decision={
+        "human_review_status": "completed",
+        "decision": "risk",
+        "opinion": "人工确认付款责任有风险",
+        "research_status": "not_required",
+    })
+    no_risk = make_entry(decision={
+        "human_review_status": "completed",
+        "decision": "no_obvious_risk",
+        "opinion": "人工确认无明显风险",
+        "research_status": "not_required",
+    })
     query = make_entry(evidence_status="not_found", research={
         "source_types": ["public_query"],
         "query_topics": ["企业登记状态"],

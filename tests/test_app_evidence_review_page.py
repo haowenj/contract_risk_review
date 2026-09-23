@@ -136,18 +136,6 @@ class FixedEvidenceService:
                 )
         return outputs
 
-    def suggest_item(self, item, package):
-        assert item.item_id == "assessed"
-        return {
-            "risk_status": "risk",
-            "risk_level": None,
-            "evidence_status": "found",
-            "finding": "合同约定乙方承担全部延期责任",
-            "risk_description": "责任分配需要按规则核对",
-            "suggestion": "核对延期责任范围",
-        }
-
-
 def parsed_rules() -> dict:
     items = []
     for item_id, number, text, scope in [
@@ -356,7 +344,7 @@ def test_result_page_leads_with_contract_situation_and_next_queries(tmp_path: Pa
     assert "来源对象 12" not in page.text
 
 
-def test_existing_result_can_generate_system_advice_without_overwriting_human_state(
+def test_existing_result_has_no_second_model_judgment_action(
     tmp_path: Path,
 ):
     client, _, rule_set = build_client(tmp_path)
@@ -369,7 +357,7 @@ def test_existing_result_can_generate_system_advice_without_overwriting_human_st
     result_url = f"/contracts/c1/evidence-review?run_id={run_id}"
 
     before = client.get(result_url)
-    assert "为已有结果生成系统建议" in before.text
+    assert "为已有结果生成系统建议" not in before.text
 
     submitted = client.post(
         f"/contracts/c1/evidence-review/runs/{run_id}/suggestions",
@@ -377,15 +365,13 @@ def test_existing_result_can_generate_system_advice_without_overwriting_human_st
     )
     after = client.get(result_url)
 
-    assert submitted.status_code == 303
-    assert "疑似有风险" in after.text
-    assert "合同约定乙方承担全部延期责任" in after.text
-    assert "系统建议" in after.text
-    assert 'value="risk" selected' in after.text
-    assert "人工意见（已填入系统建议，请核对）" in after.text
+    assert submitted.status_code == 404
+    assert "疑似有风险" not in after.text
+    assert "乙方承担全部延期责任" in after.text
+    assert "系统建议" not in after.text
     assert "为已有结果生成系统建议" not in after.text
     payload = client.get(f"/api/contracts/c1/evidence-review/runs/{run_id}").json()
-    assert payload["items"][3]["evidence_package"]["system_suggestion"]["risk_status"] == "risk"
+    assert payload["items"][3]["evidence_package"]["system_suggestion"] is None
     assert payload["items"][3]["human_decision"]["human_review_status"] == "pending"
 
 

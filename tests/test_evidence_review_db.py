@@ -59,68 +59,6 @@ def test_machine_ready_keeps_human_review_pending(tmp_path: Path):
     assert repository.list_evidence_items(run.run_id)[0].rule_item_id == "item-1"
 
 
-def test_ready_run_can_add_system_suggestion_without_replacing_human_review(tmp_path: Path):
-    repository = EvidenceReviewRepository(tmp_path / "contracts.db")
-    run = repository.create_evidence_run(
-        contract_id="c1",
-        rule_set_id="rules-1",
-        rule_snapshot=rule_snapshot(),
-    )
-    repository.mark_evidence_run_processing(run.run_id)
-    repository.complete_evidence_run(
-        run.run_id,
-        [{
-            "rule_item_id": "item-1",
-            "rule_snapshot": rule_snapshot()["review_items"][0],
-            "evidence_package": package("item-1"),
-        }],
-        progress={"stage": "completed", "completed": 1, "total": 1},
-    )
-
-    assert repository.claim_suggestion_generation(run.run_id, total=1)
-    assert not repository.claim_suggestion_generation(run.run_id, total=1)
-    repository.save_system_suggestion(run.run_id, "item-1", {
-        "risk_status": "risk",
-        "risk_level": None,
-        "evidence_status": "found",
-        "finding": "付款条件偏离规则",
-        "risk_description": "付款责任安排不符合规则",
-        "suggestion": "人工核对付款条款",
-    })
-    repository.update_suggestion_progress(
-        run.run_id, status="completed", completed=1, total=1
-    )
-
-    stored = repository.list_evidence_items(run.run_id)[0]
-    decision = repository.get_evidence_decision(run.run_id, "item-1")
-    assert stored.evidence_package["system_suggestion"]["risk_status"] == "risk"
-    assert decision.decision.human_review_status == "pending"
-    assert repository.get_evidence_run(run.run_id).progress["suggestion_status"] == "completed"
-
-
-def test_interrupted_suggestion_generation_can_be_retried(tmp_path: Path):
-    repository = EvidenceReviewRepository(tmp_path / "contracts.db")
-    run = repository.create_evidence_run(
-        contract_id="c1", rule_set_id="rules-1", rule_snapshot=rule_snapshot()
-    )
-    repository.mark_evidence_run_processing(run.run_id)
-    repository.complete_evidence_run(
-        run.run_id,
-        [{
-            "rule_item_id": "item-1",
-            "rule_snapshot": rule_snapshot()["review_items"][0],
-            "evidence_package": package("item-1"),
-        }],
-        progress={"stage": "completed", "completed": 1, "total": 1},
-    )
-    assert repository.claim_suggestion_generation(run.run_id, total=1)
-
-    assert repository.recover_incomplete_evidence_runs("服务重启") == 0
-
-    assert repository.get_evidence_run(run.run_id).progress["suggestion_status"] == "failed"
-    assert repository.claim_suggestion_generation(run.run_id, total=1)
-
-
 def test_run_rule_snapshot_is_an_immutable_copy(tmp_path: Path):
     repository = EvidenceReviewRepository(tmp_path / "contracts.db")
     snapshot = rule_snapshot()

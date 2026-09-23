@@ -37,14 +37,13 @@
     .metrics{grid-template-columns:repeat(3,minmax(0,1fr))}
     .metric.risk{background:#fff3f0;border-color:#efc8bf}.metric.no-risk{background:#eef8f5;border-color:#c6e7dd}
     .result-intro .summary-note{margin:13px 0 0;color:#52637a}
-    .suggestion-backfill{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:17px;padding:13px 15px;border-radius:9px;background:#eef5ff;color:#2f4e73}
-    .suggestion-backfill p{margin:0;flex:1}.suggestion-backfill button{white-space:nowrap}
     .result-list-head .filters{margin:15px 0 0}.result-list-head .filters label{min-width:210px}
     .verdict{display:inline-flex;flex-direction:column;align-items:flex-end;gap:1px;padding:7px 12px;border-radius:9px;background:#eef2f7;color:#43566f;font-weight:750;white-space:nowrap}
     .verdict small{font-size:11px;font-weight:600;color:inherit;opacity:.8}
     .verdict.risk{background:#fff0eb;color:#a43627}.verdict.no-obvious-risk{background:#e8f6ef;color:#176444}
     .contract-situation{padding:14px 16px;border-radius:10px;background:#f6f9fd}
     .contract-situation strong{display:block;color:#385472;font-size:13px}.contract-situation p{margin:5px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+    .contract-facts{margin:7px 0;padding-left:20px;overflow-wrap:anywhere}
     .contract-situation .meta{display:block;margin-top:6px}
     .query-todo,.material-todo{margin-top:10px;padding:12px 15px;border-radius:9px;background:#eef7ff}
     .material-todo{background:#fff8e8}.query-todo strong,.material-todo strong{display:block;margin-bottom:5px}
@@ -53,7 +52,7 @@
     @media(max-width:760px){.result-intro{padding:20px}.result-intro h2{font-size:25px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.item-top,.list-heading{display:block}.verdict{align-items:flex-start;margin-bottom:12px}.item{padding:18px}.item-actions{display:block}.item-actions details{margin-bottom:10px}.filters label{width:100%}}
   </style>
 </head>
-<body data-run-id="{{ run_id or '' }}" data-run-status="{{ run.status if run else '' }}" data-suggestion-status="{{ run.progress.suggestion_status if run and run.progress.suggestion_status else '' }}">
+<body data-run-id="{{ run_id or '' }}" data-run-status="{{ run.status if run else '' }}">
   <header class="topbar"><strong>合同风险审阅 · 合同校验</strong><a href="/">← 返回合同列表</a></header>
   <main class="shell">
     <h1>{{ '合同检查结果' if run and run.status == 'ready' else '合同校验' }}</h1>
@@ -85,19 +84,15 @@
       {% set items = run['items'] %}
       <p class="result-nav"><a href="/contracts/{{ selected_contract.contract_id }}/evidence-review">← 选择其他规则或查看历史结果</a></p>
       <section class="card result-intro">
-        <div class="eyebrow">逐条规则 · 初步建议</div>
+        <div class="eyebrow">逐条规则 · 校验情况</div>
         <h2>本次检查</h2>
-        <p>系统建议仅依据当前找到的合同内容，<strong>需要核对原文；资料不足时不会判为无风险。</strong>最终结论由人工确认。</p>
+        <p>按已有合同证据和提取事实展示每条规则的情况。<strong>未完成核对的规则不会被判为无风险。</strong>风险结论由人工确认。</p>
         <div class="metrics" aria-label="规则判断汇总">
-          <div class="metric risk"><small>提示有风险</small><strong>{{ result_summary.risk }}</strong><span>请核对合同依据</span></div>
-          <div class="metric no-risk"><small>暂未见明显风险</small><strong>{{ result_summary.no_obvious_risk }}</strong><span>仍需人工确认</span></div>
+          <div class="metric risk"><small>已确认有风险</small><strong>{{ result_summary.risk }}</strong><span>人工确认结果</span></div>
+          <div class="metric no-risk"><small>已确认无明显风险</small><strong>{{ result_summary.no_obvious_risk }}</strong><span>人工确认结果</span></div>
           <div class="metric"><small>待核实</small><strong>{{ result_summary.needs_review }}</strong><span>补资料或查阅合同</span></div>
         </div>
         <p class="summary-note">共 {{ result_summary.total }} 项规则；其中 {{ result_summary.online_query }} 项需要联网查询。人工已确认 {{ run.human_summary.completed_count }} 项。</p>
-        {% if suggestion_missing_count %}
-          {% if run.progress.suggestion_status == 'processing' %}<p class="notice">正在补充系统建议：{{ run.progress.suggestion_completed or 0 }} / {{ run.progress.suggestion_total or suggestion_missing_count }}</p>
-          {% else %}<div class="suggestion-backfill"><p>这次校验还有 {{ suggestion_missing_count }} 项有合同依据、尚未生成系统建议。</p><form action="/contracts/{{ selected_contract.contract_id }}/evidence-review/runs/{{ run.run_id }}/suggestions" method="post"><button type="submit">为已有结果生成系统建议</button></form></div>{% endif %}
-        {% endif %}
       </section>
       <section class="card result-list-head">
         <div class="list-heading"><div><div class="eyebrow">逐项查看</div><h2>每条规则的情况</h2><p class="muted">先看结论和待办，合同原文与详细信息可展开查看。</p></div><span id="visible-count" class="visible-count">共 {{ items|length }} 项</span></div>
@@ -110,7 +105,7 @@
           {% set item = entry.rule_snapshot %}{% set package = entry.evidence_package %}{% set research = package.research_package %}{% set human = entry.human_decision %}{% set display = result_by_id[item.item_id] %}{% set submitted = decision_item_id == item.item_id %}
           <article class="item status-{{ package.evidence_status }}" id="item-{{ item.item_id }}" data-result-status="{{ display.filter_status }}">
             <div class="item-top"><div class="item-heading"><div class="muted item-path">{{ item.section_path|join(' / ') }}</div><h3>{{ item.source_number or loop.index }} {{ item.name }}</h3></div><div class="verdict {{ 'risk' if display.verdict_key == 'risk' else 'no-obvious-risk' if display.verdict_key == 'no_obvious_risk' else '' }}">{{ display.verdict_label }}{% if display.verdict_source %}<small>{{ display.verdict_source }}</small>{% endif %}</div></div>
-            <div class="contract-situation"><strong>{{ display.contract_label }}</strong><p>{{ display.contract_text }}</p>{% if display.contract_page %}<span class="meta">合同第 {{ display.contract_page }} 页 · 请核对原文</span>{% endif %}</div>
+            <div class="contract-situation"><strong>{{ display.contract_label }}</strong>{% if display.contract_facts %}<ul class="contract-facts">{% for fact in display.contract_facts %}<li>{{ fact }}</li>{% endfor %}</ul>{% endif %}<p>{{ display.contract_text }}</p>{% if display.contract_page %}<span class="meta">合同第 {{ display.contract_page }} 页 · 请核对原文</span>{% endif %}</div>
             {% if display.online_queries %}<div class="query-todo"><strong>需要联网查询</strong><ul>{% for topic in display.online_queries %}<li>{{ topic }}</li>{% endfor %}</ul>{% if display.query_prerequisites %}<p>查询前还需确认：{{ display.query_prerequisites|join('、') }}</p>{% endif %}</div>{% endif %}
             {% if display.missing_materials %}<div class="material-todo"><strong>还需补充</strong><ul>{% for source in display.missing_materials %}<li>{{ source }}</li>{% endfor %}</ul></div>{% endif %}
             {% if research and human.research_status == 'pending' and not display.online_queries and not display.missing_materials %}<div class="material-todo"><strong>还需核实</strong>{{ research.query_topics|join('、') if research.query_topics else research.reason }}</div>{% endif %}
@@ -122,7 +117,6 @@
                 <h4>规则原文</h4><p class="rule">{{ item.rule_text }}</p>
                 {% if package.evidence %}<h4>合同原文摘录 <span class="detail-note">机器检索结果，请核对原件</span></h4>{% for evidence in package.evidence %}<div class="evidence"><div class="meta">{% if evidence.page_idx is not none %}合同第 {{ evidence.page_idx + 1 }} 页{% else %}合同内容{% endif %}</div><div class="evidence-text">{{ evidence.evidence_text }}</div></div>{% endfor %}{% endif %}
                 {% if package.extracted_facts %}<h4>机器提取的信息 <span class="detail-note">请按合同原文核实</span></h4>{% for fact in package.extracted_facts %}<div class="fact"><strong>{{ fact.label }}</strong><span>{{ fact.value }}{% if fact.unit %} {{ fact.unit }}{% endif %}</span></div>{% endfor %}{% endif %}
-                {% if package.system_suggestion %}<h4>系统建议的核对重点</h4><p class="rule">{{ package.system_suggestion.suggestion }}</p>{% endif %}
                 {% if research %}<h4>需要人工查询和比对</h4><div class="research"><p>{{ research.reason }}</p>
                   {% if research.query_targets %}<div class="target-list"><strong>查询对象</strong>{% for target in research.query_targets %}<div class="target">{% for key,value in target.fields.items() %}<span>{{ identifier_label(key) }}：{{ value }}</span>{% endfor %}</div>{% endfor %}</div>{% endif %}
                   {% if research.missing_identifiers %}<p class="warning"><strong>查询前还缺：</strong>{% for key in research.missing_identifiers %}{{ identifier_label(key) }}{% if not loop.last %}、{% endif %}{% endfor %}</p>{% endif %}
@@ -132,16 +126,15 @@
               </div></details>
               <details class="decision-details" {% if submitted %}open{% endif %}><summary>{% if human.human_review_status == 'completed' %}修改人工结论{% else %}确认或修改结论{% endif %}</summary>
                 <form class="decision-form" action="/contracts/{{ selected_contract.contract_id }}/evidence-review/runs/{{ run.run_id }}/items/{{ item.item_id }}/decision" method="post">
-                  {% set suggested_decision = {'risk': 'risk', 'no_obvious_risk': 'no_obvious_risk', 'needs_review': 'cannot_determine'}.get(package.system_suggestion.risk_status, '') if package.system_suggestion else '' %}
-                  {% set decision_value = decision_input.get('decision', '') if submitted else (human.decision or suggested_decision) %}
-                  {% set level_value = decision_input.get('risk_level', '') if submitted else (human.risk_level or (package.system_suggestion.risk_level if package.system_suggestion else '')) %}
+                  {% set decision_value = decision_input.get('decision', '') if submitted else (human.decision or '') %}
+                  {% set level_value = decision_input.get('risk_level', '') if submitted else (human.risk_level or '') %}
                   {% set research_value = decision_input.get('research_status', human.research_status) if submitted else human.research_status %}
-                  {% set opinion_value = decision_input.get('opinion', '') if submitted else (human.opinion or (package.system_suggestion.finding if package.system_suggestion else '')) %}
+                  {% set opinion_value = decision_input.get('opinion', '') if submitted else human.opinion %}
                   {% set notes_value = decision_input.get('research_notes', '') if submitted else human.research_notes %}
                   <label><span>人工结论</span><select name="decision"><option value="" {% if not decision_value %}selected{% endif %}>继续待判断</option><option value="risk" {% if decision_value == 'risk' %}selected{% endif %}>有风险</option><option value="no_obvious_risk" {% if decision_value == 'no_obvious_risk' %}selected{% endif %}>无明显风险</option><option value="cannot_determine" {% if decision_value == 'cannot_determine' %}selected{% endif %}>暂无法判断</option></select></label>
                   <label><span>风险等级（可空）</span><select name="risk_level"><option value="" {% if not level_value %}selected{% endif %}>未分级</option><option value="high" {% if level_value == 'high' %}selected{% endif %}>高</option><option value="medium" {% if level_value == 'medium' %}selected{% endif %}>中</option><option value="low" {% if level_value == 'low' %}selected{% endif %}>低</option></select></label>
                   <label><span>查询状态</span><select name="research_status"><option value="not_required" {% if research_value == 'not_required' %}selected{% endif %}>无需查询</option><option value="pending" {% if research_value == 'pending' %}selected{% endif %}>待查询</option><option value="completed" {% if research_value == 'completed' %}selected{% endif %}>已完成查询</option></select></label>
-                  <label class="wide"><span>人工意见{% if package.system_suggestion and human.human_review_status != 'completed' %}（已填入系统建议，请核对）{% endif %}</span><textarea name="opinion">{{ opinion_value }}</textarea></label>
+                  <label class="wide"><span>人工意见</span><textarea name="opinion">{{ opinion_value }}</textarea></label>
                   <label class="wide"><span>查询记录</span><textarea name="research_notes">{{ notes_value }}</textarea></label>
                   <input type="hidden" name="expected_updated_at" value="{{ human.updated_at }}">
                   <div class="submit"><button type="submit">保存人工判断</button></div>
@@ -156,7 +149,7 @@
   <script>
     const runId = document.body.dataset.runId;
     const runStatus = document.body.dataset.runStatus;
-    if (runId && (['queued','processing'].includes(runStatus) || document.body.dataset.suggestionStatus === 'processing')) {
+    if (runId && ['queued','processing'].includes(runStatus)) {
       const endpoint = '/api/contracts/{{ selected_contract.contract_id }}/evidence-review/runs/{{ run_id or "" }}';
       setTimeout(async () => { const response = await fetch(endpoint,{cache:'no-store'}); if(response.ok) location.reload(); }, 3000);
     }
