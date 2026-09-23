@@ -31,10 +31,10 @@
   </style>
 </head>
 <body data-has-pending="{{ 'true' if rule_sets|selectattr('status', 'in', ['queued', 'processing'])|list else 'false' }}">
-  <header class="topbar"><strong>风险规则库</strong><a href="/">返回合同任务</a></header>
+  <header class="topbar"><strong>风险规则库</strong><a href="/">返回合同校验</a></header>
   <main>
     <h1>风险规则库</h1>
-    <p class="muted">上传业务规则文件，系统先解析结构和取证需求，确认后再启用。</p>
+    <p class="muted">上传规则文件 → 查看解析结果 → 确认启用。规则和合同可以分别上传；校验合同时只需选择已启用的规则。</p>
     {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
     <section class="panel">
       <form action="/rule-sets" method="post" enctype="multipart/form-data">
@@ -43,12 +43,13 @@
         <button type="submit">上传并解析</button>
       </form>
     </section>
-    <h2>已上传规则</h2>
+    <h2>规则列表</h2>
+    {% set status_labels = {'queued':'排队中','processing':'解析中','draft':'待确认启用','active':'已启用','failed':'解析失败'} %}
     <ul>
       {% for item in rule_sets %}
         <li class="row">
           <div><strong>{{ item.name }} · v{{ item.version }}</strong><small class="muted">{{ item.source_filename }} · {{ item.created_at }}</small></div>
-          <div><span class="status status-{{ item.status }}">{{ item.status }}</span>　<a href="/rule-sets/{{ item.rule_set_id }}">查看</a></div>
+          <div><span class="status status-{{ item.status }}">{{ status_labels.get(item.status, item.status) }}</span>　<a href="/rule-sets/{{ item.rule_set_id }}">查看规则</a></div>
         </li>
       {% else %}<li class="empty">还没有规则集。</li>{% endfor %}
     </ul>

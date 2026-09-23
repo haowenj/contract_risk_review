@@ -408,6 +408,22 @@ class EvidenceReviewRepository:
             ).fetchone()
         return self._evidence_run_from_row(row)
 
+    def list_evidence_runs(
+        self,
+        contract_id: str,
+    ) -> list[EvidenceReviewRunRecord]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM evidence_review_runs
+                WHERE contract_id = ?
+                ORDER BY created_at DESC, rowid DESC
+                LIMIT 20
+                """,
+                (contract_id,),
+            ).fetchall()
+        return [self._evidence_run_from_row(row) for row in rows]
+
     def mark_evidence_run_processing(
         self,
         run_id: str,

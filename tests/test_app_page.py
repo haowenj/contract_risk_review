@@ -50,7 +50,7 @@ class ServerRenderedPageTest(TestCase):
             self.assertNotIn("请选择一份合同", response.text)
             self.assertIn('data-poll-interval="10000"', response.text)
 
-    def test_ready_contract_shows_evaluation_entry_without_chat_module(self):
+    def test_ready_contract_shows_rule_selection_without_test_entries(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             settings = Settings(
@@ -75,11 +75,12 @@ class ServerRenderedPageTest(TestCase):
             self.assertNotIn(f'href="/contracts/{contract.contract_id}"', home_response.text)
             self.assertNotIn("开始问答", home_response.text)
             self.assertIn(
-                f"/contracts/{contract.contract_id}/review",
+                f"/contracts/{contract.contract_id}/evidence-review",
                 home_response.text,
             )
-            self.assertIn("风险评估", home_response.text)
-            self.assertIn("召回测试", home_response.text)
+            self.assertIn("选择规则并校验", home_response.text)
+            self.assertNotIn("召回测试", home_response.text)
+            self.assertNotIn("实验性自动判断", home_response.text)
             self.assertIn("重新解析", home_response.text)
             self.assertIn(">已就绪<", home_response.text)
             self.assertNotIn("可问答", home_response.text)

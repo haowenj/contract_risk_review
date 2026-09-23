@@ -58,13 +58,13 @@ def test_ready_contract_has_evaluation_entry_and_page_shows_default_case():
         page_response = client.get("/contracts/c1/evaluation")
 
     assert home_response.status_code == 200
-    assert "/contracts/c1/evaluation" in home_response.text
+    assert "/contracts/c1/evaluation" not in home_response.text
     assert "/contracts/c1/evaluation/metadata" in page_response.text
     assert "查看解析对象" in page_response.text
     assert "查看检索上下文" in page_response.text
     assert "/contracts/c1/evaluation/retrieval-context" in page_response.text
-    assert ">召回测试<" in home_response.text
-    assert "evaluationLink.textContent = '召回测试';" in home_response.text
+    assert ">召回测试<" not in home_response.text
+    assert "evaluationLink" not in home_response.text
     assert page_response.status_code == 200
     assert "默认问题" in page_response.text
     assert 'name="question"' in page_response.text

@@ -155,11 +155,15 @@ def create_app(
         error: str | None = None,
     ) -> HTMLResponse:
         contracts = active_service.list_contracts()
+        rule_sets = active_rule_set_repository.list_rule_sets()
         return templates.TemplateResponse(
             request=request,
             name="index.html",
             context={
                 "contracts": contracts,
+                "active_rule_set_count": sum(
+                    rule_set.status == "active" for rule_set in rule_sets
+                ),
                 "error": error,
             },
         )
@@ -236,10 +240,9 @@ def create_app(
                 f"合同当前状态为 {status_label(contract.status)}，"
                 "完成入库后才能进行人工取证。"
             )
+        all_rule_sets = active_rule_set_repository.list_rule_sets()
         active_rule_sets = [
-            value
-            for value in active_rule_set_repository.list_rule_sets()
-            if value.status == "active"
+            value for value in all_rule_sets if value.status == "active"
         ]
         return templates.TemplateResponse(
             request=request,
@@ -248,6 +251,12 @@ def create_app(
             context={
                 "selected_contract": contract,
                 "active_rule_sets": active_rule_sets,
+                "rule_set_names": {
+                    value.rule_set_id: value.name for value in all_rule_sets
+                },
+                "previous_runs": active_rule_set_repository.list_evidence_runs(
+                    contract_id
+                ) if run_payload is None else [],
                 "run": run_payload,
                 "run_id": run_id,
                 "error": error,

@@ -64,10 +64,19 @@
       margin: 32px auto 64px;
     }
 
-    .upload-form { margin-bottom: 42px; }
+    .flow-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-bottom:36px; }
+    .flow-card { min-width:0; padding:24px; border:1px solid #d9e2ec; border-radius:16px; background:#fff; box-shadow:0 8px 24px #1020380a; }
+    .flow-card.rules { background:linear-gradient(140deg,#fff,#f0f6ff); }
+    .flow-card.contracts { background:linear-gradient(140deg,#fff,#f4faf7); }
+    .flow-eyebrow { color:#315b8c; font-size:12px; font-weight:750; letter-spacing:.06em; }
+    .flow-card h1,.flow-card h2 { margin:7px 0 9px; font-size:23px; }
+    .flow-card p { color:#52637a; margin:0 0 18px; }
+    .flow-card .flow-state { display:block; margin:12px 0 14px; font-weight:650; color:#315b8c; }
+    .flow-card .button { display:inline-block; }
+    .upload-form { margin:0; }
 
     .upload-zone {
-      min-height: 190px;
+      min-height: 150px;
       padding: 34px 18px;
       border: 2px dashed #91a4bc;
       border-radius: 16px;
@@ -264,6 +273,7 @@
         gap: 10px;
       }
       .task-actions { justify-content: flex-start; }
+      .flow-grid { grid-template-columns:1fr; }
     }
   </style>
 </head>
@@ -272,26 +282,40 @@
     <div class="brand">
       <strong>合同风险审阅</strong>
     </div>
-    <a href="/rule-sets">风险规则库</a>
+    <nav aria-label="主流程"><a href="/rule-sets">规则文件</a>　<a href="#contracts">合同校验</a></nav>
   </header>
 
   <main class="dashboard-shell">
     {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
 
-    <form id="upload-form" class="upload-form" action="/upload" method="post" enctype="multipart/form-data">
-      <label id="upload-dropzone" class="upload-zone">
-        <strong>拖放 PDF 到这里</strong>
-        <span>或选择本地文件 · 最大 200 MiB</span>
-        <span class="button">选择 PDF</span>
-        <input id="pdf-file" name="file" type="file" accept=".pdf,application/pdf" hidden required>
-        <span id="selected-file" class="selected-file"></span>
-      </label>
-    </form>
+    <div class="flow-grid" aria-label="两条主线">
+      <section class="flow-card rules" id="rules">
+        <span class="flow-eyebrow">主线 1 · 规则准备</span>
+        <h1>规则文件</h1>
+        <p>上传规则文件并解析，查看解析内容后启用。已启用的规则可在合同校验时选择。</p>
+        <span class="flow-state">当前 {{ active_rule_set_count }} 套规则已启用</span>
+        <a class="button primary" href="/rule-sets">上传或查看规则</a>
+      </section>
+      <section class="flow-card contracts" id="contracts">
+        <span class="flow-eyebrow">主线 2 · 合同校验</span>
+        <h2>上传合同</h2>
+        <p>合同解析完成后，从下方合同列表选择已启用规则，执行校验并查看结果。</p>
+        <form id="upload-form" class="upload-form" action="/upload" method="post" enctype="multipart/form-data">
+          <label id="upload-dropzone" class="upload-zone">
+            <strong>拖放合同 PDF 到这里</strong>
+            <span>或选择本地文件 · 最大 200 MiB</span>
+            <span class="button">选择 PDF</span>
+            <input id="pdf-file" name="file" type="file" accept=".pdf,application/pdf" hidden required>
+            <span id="selected-file" class="selected-file"></span>
+          </label>
+        </form>
+      </section>
+    </div>
 
     <div class="page-heading">
       <div>
         <h1>合同任务</h1>
-        <p>合同会在后台完成解析、清洗和索引构建。</p>
+        <p>合同会在后台完成解析。解析成功后即可选择规则校验。</p>
       </div>
       <span id="queue-summary" class="summary"></span>
     </div>
@@ -312,9 +336,7 @@
           <span class="status status-{{ contract.status }}">{{ contract.status|status_label }}</span>
           <div class="task-actions">
             {% if contract.status == "ready" %}
-              <a class="button primary" href="/contracts/{{ contract.contract_id }}/evidence-review">人工取证</a>
-              <a class="button" href="/contracts/{{ contract.contract_id }}/review">实验性自动判断（风险评估）</a>
-              <a class="button" href="/contracts/{{ contract.contract_id }}/evaluation">召回测试</a>
+              <a class="button primary" href="/contracts/{{ contract.contract_id }}/evidence-review">选择规则并校验</a>
               <button type="button" data-reprocess-contract-id="{{ contract.contract_id }}">重新解析</button>
             {% elif contract.status == "failed" %}
               <button type="button" data-reprocess-contract-id="{{ contract.contract_id }}">重新解析</button>
@@ -325,7 +347,7 @@
           </div>
         </li>
       {% else %}
-        <li class="empty-state">还没有上传合同，点击上方“选择 PDF”开始。</li>
+        <li class="empty-state">还没有上传合同，请在上方上传合同 PDF。</li>
       {% endfor %}
     </ul>
   </main>
@@ -445,18 +467,8 @@
         const evidenceLink = document.createElement('a');
         evidenceLink.className = 'button primary';
         evidenceLink.href = `/contracts/${encodeURIComponent(contract.contract_id)}/evidence-review`;
-        evidenceLink.textContent = '人工取证';
+        evidenceLink.textContent = '选择规则并校验';
         actions.append(evidenceLink);
-        const reviewLink = document.createElement('a');
-        reviewLink.className = 'button';
-        reviewLink.href = `/contracts/${encodeURIComponent(contract.contract_id)}/review`;
-        reviewLink.textContent = '实验性自动判断（风险评估）';
-        actions.append(reviewLink);
-        const evaluationLink = document.createElement('a');
-        evaluationLink.className = 'button';
-        evaluationLink.href = `/contracts/${encodeURIComponent(contract.contract_id)}/evaluation`;
-        evaluationLink.textContent = '召回测试';
-        actions.append(evaluationLink);
         actions.append(createButton(
           '重新解析',
           { reprocessContractId: contract.contract_id },
@@ -490,7 +502,7 @@
       if (contracts.length === 0) {
         const empty = document.createElement('li');
         empty.className = 'empty-state';
-        empty.textContent = '还没有上传合同，点击右上角“上传合同”开始。';
+        empty.textContent = '还没有上传合同，请在上方上传合同 PDF。';
         contractList.append(empty);
         return;
       }

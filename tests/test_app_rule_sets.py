@@ -185,8 +185,8 @@ def test_draft_detail_renders_structure_classification_and_data_needs(
         "1.2",
         "付款条件应结合合同约定核验",
         "第 2 页",
-        "hybrid",
-        "query_and_compare",
+        "合同与补充资料",
+        "查询并比对",
         "相对方公司名称",
         "企业登记状态",
         "名称及存续状态",
@@ -249,4 +249,22 @@ def test_dashboard_links_to_rule_set_management(tmp_path: Path):
 
     assert response.status_code == 200
     assert 'href="/rule-sets"' in response.text
-    assert "风险规则库" in response.text
+    assert "上传或查看规则" in response.text
+    assert "规则文件" in response.text
+    assert "合同校验" in response.text
+
+
+def test_active_rule_set_detail_offers_contract_flow(tmp_path: Path):
+    client, repository, _, _ = build_client(tmp_path)
+    record = create_record(repository, tmp_path)
+    repository.mark_rule_set_processing(record.rule_set_id)
+    repository.mark_rule_set_draft(record.rule_set_id, draft_payload())
+    repository.activate_rule_set(record.rule_set_id)
+
+    page = client.get(f"/rule-sets/{record.rule_set_id}")
+
+    assert "已启用" in page.text
+    assert "前往合同校验" in page.text
+    assert 'href="/"' in page.text
+    assert "query_and_compare" not in page.text
+    assert "public_query" not in page.text

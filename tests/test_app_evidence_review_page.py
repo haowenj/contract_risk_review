@@ -209,7 +209,7 @@ def build_client(tmp_path: Path, *, contract_status="ready"):
     return TestClient(application), repository, rule_set
 
 
-def test_page_lists_active_rule_sets_and_dashboard_prefers_manual_evidence(
+def test_page_lists_active_rule_sets_and_dashboard_has_one_review_entry(
     tmp_path: Path,
 ):
     client, _, rule_set = build_client(tmp_path)
@@ -221,8 +221,13 @@ def test_page_lists_active_rule_sets_and_dashboard_prefers_manual_evidence(
     assert rule_set.name in page.text
     assert f'value="{rule_set.rule_set_id}"' in page.text
     assert 'href="/contracts/c1/evidence-review"' in dashboard.text
-    assert "人工取证" in dashboard.text
-    assert "实验性自动判断" in dashboard.text
+    assert "选择规则并校验" in dashboard.text
+    assert 'href="/contracts/c1/review"' not in dashboard.text
+    assert 'href="/contracts/c1/evaluation"' not in dashboard.text
+    assert "实验性自动判断" not in dashboard.text
+    assert "召回测试" not in dashboard.text
+    assert "reviewLink" not in dashboard.text
+    assert "evaluationLink" not in dashboard.text
 
 
 def test_run_creation_executes_in_background_and_redirects(tmp_path: Path):
@@ -240,6 +245,23 @@ def test_run_creation_executes_in_background_and_redirects(tmp_path: Path):
         f"/contracts/c1/evidence-review?run_id={run_id}"
     )
     assert repository.get_evidence_run(run_id).status == "ready"
+
+
+def test_contract_rule_selection_page_links_to_previous_result(tmp_path: Path):
+    client, _, rule_set = build_client(tmp_path)
+    created = client.post(
+        "/contracts/c1/evidence-review/runs",
+        data={"rule_set_id": rule_set.rule_set_id},
+        follow_redirects=False,
+    )
+    run_id = parse_qs(urlparse(created.headers["location"]).query)["run_id"][0]
+
+    page = client.get("/contracts/c1/evidence-review")
+
+    assert page.status_code == 200
+    assert "历史校验结果" in page.text
+    assert rule_set.name in page.text
+    assert f'/contracts/c1/evidence-review?run_id={run_id}' in page.text
 
 
 def test_ready_page_displays_evidence_facts_missing_sources_and_research(
@@ -290,7 +312,7 @@ def test_result_page_explains_provisional_evidence_and_collapses_details(tmp_pat
     page = client.get(f"/contracts/c1/evidence-review?run_id={run_id}")
 
     assert page.status_code == 200
-    assert "取证结果" in page.text
+    assert "校验结果" in page.text
     assert "候选合同片段" in page.text
     assert "不能直接作为风险结论" in page.text
     assert "取证失败" in page.text
