@@ -19,6 +19,44 @@ from main import create_app
 
 
 class ServerRenderedPageTest(TestCase):
+    def test_processing_contract_shows_stage_progress_until_finished(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = Settings(
+                project_dir=root,
+                data_dir=root / "data",
+                database_path=root / "data" / "contracts.db",
+                contracts_dir=root / "data" / "contracts",
+                mineru_url="http://mineru.test",
+                mineru_backend="hybrid-engine",
+                mineru_server_url=None,
+            )
+            repository = ContractRepository(settings.database_path)
+            contract = repository.create("contract.pdf", root / "contract")
+            service = ContractService(repository, settings, Mock(), Mock())
+            client = TestClient(create_app(settings=settings, service=service))
+
+            for stage, label in (
+                ("document_parsing", "正在完成文档解析"),
+                ("vector_index", "正在构建向量索引"),
+                ("bm25_index", "正在构建 BM25 索引"),
+            ):
+                with self.subTest(stage=stage):
+                    repository.update_status(
+                        contract.contract_id, "processing", processing_stage=stage
+                    )
+                    response = client.get("/")
+                    self.assertIn(label, response.text)
+                    self.assertIn(
+                        f'class="stage-progress" data-stage="{stage}"',
+                        response.text,
+                    )
+
+            repository.update_status(
+                contract.contract_id, "ready", processing_stage="completed"
+            )
+            self.assertNotIn('class="stage-progress"', client.get("/").text)
+
     def test_home_page_contains_task_list_without_chat_form(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

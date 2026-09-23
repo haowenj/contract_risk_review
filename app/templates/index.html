@@ -156,6 +156,36 @@
     .task-row small { margin-top: 4px; color: #5f7087; }
     .task-row small.task-error { color: #b91c1c; }
 
+    .stage-progress {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 5px;
+      width: min(100%, 420px);
+      margin-top: 9px;
+    }
+
+    .stage-progress span {
+      height: 8px;
+      border-radius: 999px;
+      background: #dce5ef;
+    }
+
+    .stage-progress .done { background: #3b82f6; }
+    .stage-progress .active {
+      background: linear-gradient(90deg, #bfdbfe, #2563eb, #bfdbfe);
+      background-size: 200% 100%;
+      animation: stage-sweep 1.8s linear infinite;
+    }
+
+    @keyframes stage-sweep {
+      from { background-position: 200% 0; }
+      to { background-position: -200% 0; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .stage-progress .active { animation: none; background: #60a5fa; }
+    }
+
     .status { font-weight: 650; white-space: nowrap; }
     .status-queued { color: #64748b; }
     .status-processing { color: #2563eb; }
@@ -327,6 +357,14 @@
             {% if contract.processing_stage %}
               <small>{{ contract.processing_stage|processing_stage_label }}</small>
             {% endif %}
+            {% if contract.status == "processing" and contract.processing_stage in ["document_parsing", "vector_index", "bm25_index"] %}
+              {% set current_stage = {"document_parsing": 0, "vector_index": 1, "bm25_index": 2}[contract.processing_stage] %}
+              <div class="stage-progress" data-stage="{{ contract.processing_stage }}" aria-hidden="true">
+                {% for stage_index in range(3) %}
+                  <span class="{{ 'done' if stage_index < current_stage else 'active' if stage_index == current_stage else '' }}"></span>
+                {% endfor %}
+              </div>
+            {% endif %}
             {% if contract.error_message %}
               <small class="task-error">{{ contract.error_message }}</small>
             {% endif %}
@@ -466,6 +504,23 @@
         stage.textContent = processingStageLabels[contract.processing_stage]
           || contract.processing_stage;
         identity.append(stage);
+      }
+      const stageIndex = {
+        document_parsing: 0,
+        vector_index: 1,
+        bm25_index: 2,
+      }[contract.processing_stage];
+      if (contract.status === 'processing' && stageIndex !== undefined) {
+        const progress = document.createElement('div');
+        progress.className = 'stage-progress';
+        progress.dataset.stage = contract.processing_stage;
+        progress.setAttribute('aria-hidden', 'true');
+        for (let index = 0; index < 3; index += 1) {
+          const segment = document.createElement('span');
+          segment.className = index < stageIndex ? 'done' : index === stageIndex ? 'active' : '';
+          progress.append(segment);
+        }
+        identity.append(progress);
       }
       if (contract.error_message) {
         const error = document.createElement('small');
