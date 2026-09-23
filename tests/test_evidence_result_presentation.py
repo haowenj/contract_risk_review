@@ -65,6 +65,24 @@ def test_extracted_contract_facts_are_shown_without_a_new_model_judgment():
     assert result["contract_facts"] == ["付款期限：30 天"]
 
 
+def test_conflicting_fact_values_show_both_with_their_source_pages():
+    entry = make_entry()
+    entry["evidence_package"]["evidence"] = [
+        {"page_idx": 1, "evidence_text": "付款期限为30天"},
+        {"page_idx": 3, "evidence_text": "付款期限为60天"},
+    ]
+    entry["evidence_package"]["extracted_facts"] = [
+        {"fact_key": "payment_term", "label": "付款期限", "value": "30", "unit": "天", "evidence_indices": [0]},
+        {"fact_key": "payment_term", "label": "付款期限", "value": "60", "unit": "天", "evidence_indices": [1]},
+    ]
+
+    result = present_result_item(entry)
+
+    assert result["contract_facts"] == ["付款期限：30 天（合同第 2 页）", "付款期限：60 天（合同第 4 页）"]
+    assert result["fact_conflicts"] == ["付款期限"]
+    assert result["verdict_key"] == "needs_review"
+
+
 def test_external_query_is_a_todo_not_a_contract_no_risk_result():
     entry = make_entry(
         evidence_status="not_found",

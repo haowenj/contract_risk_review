@@ -66,13 +66,39 @@ def present_result_item(entry: Mapping) -> dict:
         ]
 
     evidence = package.get("evidence") or []
+    facts = package.get("extracted_facts") or []
+    fact_values: dict[str, set[tuple[str, str | None]]] = {}
+    for fact in facts:
+        key = fact.get("fact_key") or fact["label"]
+        fact_values.setdefault(key, set()).add((fact["value"], fact.get("unit")))
+    conflicting_keys = {
+        key for key, values in fact_values.items() if len(values) > 1
+    }
+    fact_conflicts = list(dict.fromkeys(
+        fact["label"] for fact in facts
+        if (fact.get("fact_key") or fact["label"]) in conflicting_keys
+    ))
+    visible_facts = facts[:3]
+    visible_facts += [
+        fact for fact in facts[3:]
+        if (fact.get("fact_key") or fact["label"]) in conflicting_keys
+    ]
     contract_facts = []
-    for fact in (package.get("extracted_facts") or [])[:3]:
+    for fact in visible_facts:
         value = fact["value"]
         if len(value) > 120:
             value = value[:120].rstrip() + "…"
         unit = f" {fact['unit']}" if fact.get("unit") else ""
-        contract_facts.append(f"{fact['label']}：{value}{unit}")
+        sources = []
+        for index in fact.get("evidence_indices") or []:
+            if not isinstance(index, int) or index < 0 or index >= len(evidence):
+                continue
+            page_idx = evidence[index].get("page_idx")
+            source = f"合同第 {page_idx + 1} 页" if page_idx is not None else f"摘录 {index + 1}"
+            if source not in sources:
+                sources.append(source)
+        source_text = f"（{'、'.join(sources)}）" if sources else ""
+        contract_facts.append(f"{fact['label']}：{value}{unit}{source_text}")
     first_evidence = evidence[0] if evidence else {}
     contract_page = first_evidence.get("page_idx")
     if contract_page is not None:
@@ -150,6 +176,7 @@ def present_result_item(entry: Mapping) -> dict:
         "contract_label": contract_label,
         "contract_text": contract_text,
         "contract_facts": contract_facts,
+        "fact_conflicts": fact_conflicts,
         "contract_page": contract_page,
         "online_queries": online_queries,
         "query_prerequisites": query_prerequisites,

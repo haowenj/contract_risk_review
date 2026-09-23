@@ -182,6 +182,59 @@ def test_hybrid_item_returns_evidence_facts_and_pending_research_without_risk():
     assert "internal_debug" not in json.dumps(payload, ensure_ascii=False)
 
 
+def test_repeated_fact_with_same_value_merges_evidence_without_retry():
+    query = "付款期限"
+    contract = FakeContractService({query: [
+        evidence(1, "付款期限为30天", page_idx=0),
+        evidence(2, "乙方应在30天内付款", page_idx=2),
+    ]})
+    llm = FakeLLM([{"extracted_facts": [
+        {"fact_key": "payment_term", "label": "付款期限", "value": "30", "unit": "天", "evidence_indices": [0]},
+        {"fact_key": "payment_term", "label": "付款期限", "value": "30", "unit": "天", "evidence_indices": [1, 0]},
+    ], "missing_sources": []}])
+    item = rule_item(
+        evidence_scope="contract",
+        retrieval_queries=[query],
+        fact_requirements=[{"fact_key": "payment_term", "label": "付款期限", "value_type": "integer", "required": True}],
+        research_requirements=[],
+    )
+
+    package = EvidenceReviewService(contract_service=contract, fact_llm=llm).extract_item("c1", item)
+
+    assert package.evidence_status == "found"
+    assert [(fact.value, fact.evidence_indices) for fact in package.extracted_facts] == [("30", [0, 1])]
+    assert len(llm.prompts) == 1
+
+
+def test_repeated_fact_with_different_values_preserves_both_and_research_targets():
+    query = "付款期限"
+    contract = FakeContractService({query: [
+        evidence(1, "付款期限为30天", page_idx=0),
+        evidence(2, "付款期限为60天", page_idx=2),
+    ]})
+    llm = FakeLLM([{"extracted_facts": [
+        {"fact_key": "payment_term", "label": "模型标签", "value": "30", "unit": "天", "evidence_indices": [0]},
+        {"fact_key": "payment_term", "label": "模型标签", "value": "60", "unit": "天", "evidence_indices": [1]},
+    ], "missing_sources": []}])
+    item = rule_item(
+        retrieval_queries=[query],
+        fact_requirements=[{"fact_key": "payment_term", "label": "付款期限", "value_type": "integer", "required": True}],
+        research_requirements=[{
+            "source_type": "public_query", "target_type": "payment", "required_fact_keys": ["payment_term"],
+            "query_topics": ["付款期限"], "comparison_points": ["付款期限"],
+        }],
+    )
+
+    package = EvidenceReviewService(contract_service=contract, fact_llm=llm).extract_item("c1", item)
+
+    assert package.evidence_status == "found"
+    assert [(fact.label, fact.value, fact.evidence_indices) for fact in package.extracted_facts] == [
+        ("付款期限", "30", [0]), ("付款期限", "60", [1]),
+    ]
+    assert package.research_package.query_targets[0].fields["payment_term"] == "30 天；60 天"
+    assert len(llm.prompts) == 1
+
+
 def test_contract_item_with_no_results_is_not_found_without_fact_call():
     contract = FakeContractService()
     llm = FakeLLM([])

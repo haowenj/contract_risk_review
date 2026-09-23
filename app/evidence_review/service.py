@@ -31,10 +31,23 @@ class FactExtractionResult(StrictModel):
     missing_sources: list[str]
 
     @model_validator(mode="after")
-    def validate_unique_fact_keys(self) -> FactExtractionResult:
-        keys = [value.fact_key for value in self.extracted_facts]
-        if len(keys) != len(set(keys)):
-            raise ValueError("extracted fact keys must be unique")
+    def merge_repeated_facts(self) -> FactExtractionResult:
+        merged: list[ExtractedFact] = []
+        positions: dict[tuple[str, str, str | None], int] = {}
+        for fact in self.extracted_facts:
+            identity = (fact.fact_key, fact.value, fact.unit)
+            if identity not in positions:
+                positions[identity] = len(merged)
+                merged.append(fact)
+                continue
+            index = positions[identity]
+            previous = merged[index]
+            merged[index] = previous.model_copy(update={
+                "evidence_indices": list(dict.fromkeys(
+                    [*previous.evidence_indices, *fact.evidence_indices]
+                )),
+            })
+        self.extracted_facts = merged
         return self
 
 
@@ -256,12 +269,12 @@ class EvidenceReviewService:
         if not required:
             return None
 
-        fact_values = {
-            value.fact_key: (
-                f"{value.value} {value.unit}" if value.unit else value.value
-            )
-            for value in facts
-        }
+        fact_values: dict[str, list[str]] = {}
+        for fact in facts:
+            value = f"{fact.value} {fact.unit}" if fact.unit else fact.value
+            values = fact_values.setdefault(fact.fact_key, [])
+            if value not in values:
+                values.append(value)
         fact_labels = {
             value.fact_key: value.label for value in item.fact_requirements
         }
@@ -280,7 +293,7 @@ class EvidenceReviewService:
                 if _is_sensitive_fact(key, fact_labels.get(key, "")):
                     continue
                 if key in fact_values:
-                    fields[key] = fact_values[key]
+                    fields[key] = "；".join(fact_values[key])
                 else:
                     missing_identifiers.append(key)
             targets.append(
