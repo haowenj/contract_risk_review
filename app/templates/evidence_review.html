@@ -8,6 +8,7 @@
     :root{color:#172033;background:#eef3f8;font:15px/1.6 "Avenir Next","Segoe UI",sans-serif}*{box-sizing:border-box}body{margin:0}a{color:#315b8c}.topbar{min-height:64px;padding:0 30px;background:linear-gradient(90deg,#172033,#25344f);color:white;display:flex;align-items:center;justify-content:space-between}.topbar a{color:#d8e4f1;text-decoration:none}.shell{width:min(1120px,calc(100% - 40px));margin:30px auto 64px}.card,.item{border:1px solid #d9e2ec;border-radius:14px;background:white;box-shadow:0 8px 24px #1020380a}.card{padding:22px;margin-bottom:18px}.item{padding:20px;margin:14px 0}h1,h2,h3{margin-top:0}.muted{color:#637189}.error,.notice,.warning{padding:12px 14px;border-radius:9px}.error{background:#fff1f2;color:#b91c1c}.notice{background:#eff6ff;color:#1d4f91}.warning{background:#fff8e6;color:#92400e}form.create{display:flex;gap:10px;align-items:end;flex-wrap:wrap}label span{display:block;font-weight:650;margin-bottom:5px}select,button,textarea{border:1px solid #bdcadd;border-radius:8px;padding:8px 11px;background:white;font:inherit}select,button{min-height:41px}button{background:#172033;color:white;cursor:pointer}.metrics{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr));gap:10px}.metric{padding:13px;border-radius:10px;background:#f1f5f9}.metric strong{display:block;font-size:22px}.filters{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0}.heading{display:flex;justify-content:space-between;gap:14px}.badges{display:flex;gap:6px;flex-wrap:wrap}.badge{padding:3px 9px;border-radius:999px;background:#e8eef5;font-size:13px}.rule{white-space:pre-wrap}.evidence,.fact,.research,.missing{margin-top:12px;padding:13px;border-radius:10px;background:#f7f9fc}.evidence-text{white-space:pre-wrap}.meta{color:#637189;font-size:13px}.research{background:#eef7ff}.missing{background:#fff8e6}.target{padding:9px;background:white;border-radius:8px;margin:7px 0}.target dl{margin:0;display:grid;grid-template-columns:max-content 1fr;gap:3px 10px}.target dt{font-weight:650}.target dd{margin:0;overflow-wrap:anywhere}.decision-form{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:12px;margin-top:16px;padding:16px;border-top:1px solid #d9e2ec;background:#fff}.decision-form label{display:block}.decision-form textarea{width:100%;min-height:82px;resize:vertical}.decision-form .wide{grid-column:span 3}.decision-form .submit{display:flex;align-items:end}.item[hidden]{display:none}@media(max-width:760px){.shell{width:calc(100% - 24px)}.topbar{padding:0 18px}.metrics{grid-template-columns:repeat(2,1fr)}.heading{display:block}.decision-form{grid-template-columns:1fr}.decision-form .wide{grid-column:span 1}}
     .result-intro{padding:28px;border-color:#cfdded;background:linear-gradient(145deg,#fff 72%,#edf5ff)}
     .shell>h1{font-size:clamp(20px,3vw,30px);overflow-wrap:anywhere;line-height:1.4}
+    .contract-filename{margin:5px 0 16px;color:#637189;overflow-wrap:anywhere}
     .eyebrow{color:#38618c;font-size:12px;font-weight:750;letter-spacing:.08em;text-transform:uppercase}
     .result-intro h2{font-size:30px;line-height:1.25;margin:8px 0 12px}
     .result-intro>p{max-width:850px;margin:0 0 23px;color:#42516a}
@@ -33,14 +34,30 @@
     .item-actions{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;border-top:1px solid #e5ebf2;padding-top:14px;margin-top:17px}
     .item-actions details{min-width:210px;flex:1}.item-actions details[open]{flex-basis:100%}.item-actions summary{list-style:none;border:1px solid #c7d5e5;border-radius:8px;padding:9px 13px;color:#305985;font-weight:650;cursor:pointer;background:#fff}.item-actions summary::-webkit-details-marker{display:none}.item-actions summary:after{content:'⌄';float:right;margin-left:12px}.item-actions details[open] summary:after{content:'⌃'}.decision-details summary{background:#eef5fd!important}
     .detail-body{padding:18px 4px 5px}.detail-body h4{margin:18px 0 8px;font-size:15px}.detail-body h4:first-child{margin-top:0}.detail-note{font-size:12px;font-weight:400;color:#8a5b24}.rule{margin:0;padding:12px 14px;border-radius:8px;background:#f7f9fc;color:#354761}.evidence,.fact,.research{margin:8px 0;background:#f7f9fc}.evidence-text{margin-top:5px}.fact{display:flex;justify-content:space-between;gap:12px}.fact span{text-align:right}.target-list{margin:12px 0}.target{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0}.target span{padding:2px 7px;background:#f3f6fa;border-radius:6px}.research{background:#f4f9ff}.research p{margin:8px 0}.decision-form{margin:0;padding:18px 4px 4px;border:0;background:transparent}.decision-form .submit{align-items:end}
-    @media(max-width:760px){.result-intro{padding:20px}.result-intro h2{font-size:25px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.metric.total{grid-column:span 2}.item-top,.list-heading{display:block}.badges{justify-content:flex-start;margin-bottom:10px}.item{padding:18px}.item-actions{display:block}.item-actions details{margin-bottom:10px}.filters label{width:100%}}
+    .metrics{grid-template-columns:repeat(3,minmax(0,1fr))}
+    .metric.risk{background:#fff3f0;border-color:#efc8bf}.metric.no-risk{background:#eef8f5;border-color:#c6e7dd}
+    .result-intro .summary-note{margin:13px 0 0;color:#52637a}
+    .suggestion-backfill{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:17px;padding:13px 15px;border-radius:9px;background:#eef5ff;color:#2f4e73}
+    .suggestion-backfill p{margin:0;flex:1}.suggestion-backfill button{white-space:nowrap}
+    .result-list-head .filters{margin:15px 0 0}.result-list-head .filters label{min-width:210px}
+    .verdict{display:inline-flex;flex-direction:column;align-items:flex-end;gap:1px;padding:7px 12px;border-radius:9px;background:#eef2f7;color:#43566f;font-weight:750;white-space:nowrap}
+    .verdict small{font-size:11px;font-weight:600;color:inherit;opacity:.8}
+    .verdict.risk{background:#fff0eb;color:#a43627}.verdict.no-obvious-risk{background:#e8f6ef;color:#176444}
+    .contract-situation{padding:14px 16px;border-radius:10px;background:#f6f9fd}
+    .contract-situation strong{display:block;color:#385472;font-size:13px}.contract-situation p{margin:5px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+    .contract-situation .meta{display:block;margin-top:6px}
+    .query-todo,.material-todo{margin-top:10px;padding:12px 15px;border-radius:9px;background:#eef7ff}
+    .material-todo{background:#fff8e8}.query-todo strong,.material-todo strong{display:block;margin-bottom:5px}
+    .query-todo ul,.material-todo ul{margin:0;padding-left:20px}.query-todo p{margin:7px 0 0;color:#52637a}
+    .item .saved-decision{margin-top:10px}.item .retry-hint{margin:10px 0 0}
+    @media(max-width:760px){.result-intro{padding:20px}.result-intro h2{font-size:25px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.item-top,.list-heading{display:block}.verdict{align-items:flex-start;margin-bottom:12px}.item{padding:18px}.item-actions{display:block}.item-actions details{margin-bottom:10px}.filters label{width:100%}}
   </style>
 </head>
-<body data-run-id="{{ run_id or '' }}" data-run-status="{{ run.status if run else '' }}">
+<body data-run-id="{{ run_id or '' }}" data-run-status="{{ run.status if run else '' }}" data-suggestion-status="{{ run.progress.suggestion_status if run and run.progress.suggestion_status else '' }}">
   <header class="topbar"><strong>合同风险审阅 · 合同校验</strong><a href="/">← 返回合同列表</a></header>
   <main class="shell">
-    <h1>{{ selected_contract.filename }}</h1>
-    <p class="muted">合同解析完成后，选择已启用的规则进行校验；系统整理候选片段与待查询事项，最终结论由人工填写。</p>
+    <h1>{{ '合同检查结果' if run and run.status == 'ready' else '合同校验' }}</h1>
+    <p class="contract-filename">合同：{{ selected_contract.filename }}</p>
     {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 
     {% if not run %}
@@ -68,52 +85,44 @@
       {% set items = run['items'] %}
       <p class="result-nav"><a href="/contracts/{{ selected_contract.contract_id }}/evidence-review">← 选择其他规则或查看历史结果</a></p>
       <section class="card result-intro">
-        <div class="eyebrow">合同校验 · 待人工判断</div>
-        <h2>校验结果</h2>
-        <p>系统已按规则查找合同中的可能相关内容。<strong>候选合同片段和机器提取的信息需要核对原文，不能直接作为风险结论。</strong>请优先补齐缺失资料、处理失败项，再填写人工判断。</p>
-        <div class="metrics" aria-label="取证状态汇总">
-          <div class="metric total"><small>本次检查</small><strong>{{ items|length }}</strong><span>项规则</span></div>
-          <div class="metric found"><small>有候选合同片段</small><strong>{{ evidence_summary.found }}</strong><span>仍需核对原文</span></div>
-          <div class="metric missing"><small>缺少资料</small><strong>{{ evidence_summary.source_missing }}</strong><span>先补材料</span></div>
-          <div class="metric empty"><small>未检到片段</small><strong>{{ evidence_summary.not_found }}</strong><span>需人工查阅全文</span></div>
-          <div class="metric failed"><small>取证失败</small><strong>{{ evidence_summary.extraction_failed }}</strong><span>需人工处理</span></div>
+        <div class="eyebrow">逐条规则 · 初步建议</div>
+        <h2>本次检查</h2>
+        <p>系统建议仅依据当前找到的合同内容，<strong>需要核对原文；资料不足时不会判为无风险。</strong>最终结论由人工确认。</p>
+        <div class="metrics" aria-label="规则判断汇总">
+          <div class="metric risk"><small>提示有风险</small><strong>{{ result_summary.risk }}</strong><span>请核对合同依据</span></div>
+          <div class="metric no-risk"><small>暂未见明显风险</small><strong>{{ result_summary.no_obvious_risk }}</strong><span>仍需人工确认</span></div>
+          <div class="metric"><small>待核实</small><strong>{{ result_summary.needs_review }}</strong><span>补资料或查阅合同</span></div>
         </div>
-        <div class="review-progress"><strong>人工判断 {{ run.human_summary.completed_count }} / {{ items|length }} 已完成</strong><span>待判断 {{ run.human_summary.pending_count }} 项</span>
-          {% if run.human_summary.completed_count %}<p>已标记：有风险 {{ run.human_summary.risk_count }} 项 · 无明显风险 {{ run.human_summary.no_obvious_risk_count }} 项 · 暂无法判断 {{ run.human_summary.cannot_determine_count }} 项</p>{% endif %}
-        </div>
+        <p class="summary-note">共 {{ result_summary.total }} 项规则；其中 {{ result_summary.online_query }} 项需要联网查询。人工已确认 {{ run.human_summary.completed_count }} 项。</p>
+        {% if suggestion_missing_count %}
+          {% if run.progress.suggestion_status == 'processing' %}<p class="notice">正在补充系统建议：{{ run.progress.suggestion_completed or 0 }} / {{ run.progress.suggestion_total or suggestion_missing_count }}</p>
+          {% else %}<div class="suggestion-backfill"><p>这次校验还有 {{ suggestion_missing_count }} 项有合同依据、尚未生成系统建议。</p><form action="/contracts/{{ selected_contract.contract_id }}/evidence-review/runs/{{ run.run_id }}/suggestions" method="post"><button type="submit">为已有结果生成系统建议</button></form></div>{% endif %}
+        {% endif %}
       </section>
       <section class="card result-list-head">
-        <div class="list-heading"><div><div class="eyebrow">逐项核对</div><h2>规则检查项</h2><p class="muted">先看每项的取证状态；展开后可核对合同原文、查询事项和填写人工结论。</p></div><span id="visible-count" class="visible-count">共 {{ items|length }} 项</span></div>
+        <div class="list-heading"><div><div class="eyebrow">逐项查看</div><h2>每条规则的情况</h2><p class="muted">先看结论和待办，合同原文与详细信息可展开查看。</p></div><span id="visible-count" class="visible-count">共 {{ items|length }} 项</span></div>
         <div class="filters">
-          <label><span>取证状态</span><select id="evidence-status-filter"><option value="">全部</option><option value="source_missing">缺少资料</option><option value="extraction_failed">取证失败</option><option value="not_found">未检到片段</option><option value="found">有候选片段</option></select></label>
-          <label><span>查询状态</span><select id="research-status-filter"><option value="">全部</option><option value="pending">待查询</option><option value="completed">已完成查询</option><option value="not_required">无需查询</option></select></label>
-          <label><span>人工判断</span><select id="human-status-filter"><option value="">全部</option><option value="pending">待判断</option><option value="completed">已完成</option></select></label>
+          <label><span>只看</span><select id="result-filter"><option value="">全部规则</option><option value="risk">有风险</option><option value="no_obvious_risk">无明显风险</option><option value="query">需联网查询</option><option value="materials">待补资料</option><option value="review">其他待核实</option></select></label>
         </div>
       </section>
       <section id="evidence-items" aria-label="规则取证结果">
         {% for entry in items %}
-          {% set item = entry.rule_snapshot %}{% set package = entry.evidence_package %}{% set research = package.research_package %}{% set human = entry.human_decision %}{% set submitted = decision_item_id == item.item_id %}
-          <article class="item status-{{ package.evidence_status }}" id="item-{{ item.item_id }}" data-evidence-status="{{ package.evidence_status }}" data-research-status="{{ human.research_status }}" data-human-status="{{ human.human_review_status }}">
-            <div class="item-top"><div class="item-heading"><div class="muted item-path">{{ item.section_path|join(' / ') }}</div><h3>{{ item.source_number or loop.index }} {{ item.name }}</h3></div><div class="badges">
-              {% if package.evidence_status == 'found' %}<span class="badge badge-found">有候选片段</span>{% elif package.evidence_status == 'not_found' %}<span class="badge badge-empty">未检到片段</span>{% elif package.evidence_status == 'source_missing' %}<span class="badge badge-missing">缺少资料</span>{% else %}<span class="badge badge-failed">取证失败</span>{% endif %}
-              {% if human.human_review_status == 'completed' %}<span class="badge badge-reviewed">已人工判断</span>{% else %}<span class="badge">待人工判断</span>{% endif %}
-            </div></div>
-            <div class="result-message">
-              {% if package.evidence_status == 'found' %}检到 {{ package.evidence|length }} 段可能相关的合同内容，请核对原文是否支持本项规则。
-              {% elif package.evidence_status == 'not_found' %}本次未检到相关片段。这不代表合同没有约定，请人工查阅全文和附件。
-              {% elif package.evidence_status == 'source_missing' %}这项判断需要合同之外的资料，请补齐后核对。
-              {% else %}这项没有完成取证，请核对合同原文与失败原因。{% endif %}
-            </div>
-            {% if package.missing_sources %}<div class="next-action"><strong>需要补充：</strong>{{ package.missing_sources|join('、') }}</div>{% endif %}
-            {% if package.item_error %}<p class="error">失败原因：{{ package.item_error }}</p>{% endif %}
+          {% set item = entry.rule_snapshot %}{% set package = entry.evidence_package %}{% set research = package.research_package %}{% set human = entry.human_decision %}{% set display = result_by_id[item.item_id] %}{% set submitted = decision_item_id == item.item_id %}
+          <article class="item status-{{ package.evidence_status }}" id="item-{{ item.item_id }}" data-result-status="{{ display.filter_status }}">
+            <div class="item-top"><div class="item-heading"><div class="muted item-path">{{ item.section_path|join(' / ') }}</div><h3>{{ item.source_number or loop.index }} {{ item.name }}</h3></div><div class="verdict {{ 'risk' if display.verdict_key == 'risk' else 'no-obvious-risk' if display.verdict_key == 'no_obvious_risk' else '' }}">{{ display.verdict_label }}{% if display.verdict_source %}<small>{{ display.verdict_source }}</small>{% endif %}</div></div>
+            <div class="contract-situation"><strong>{{ display.contract_label }}</strong><p>{{ display.contract_text }}</p>{% if display.contract_page %}<span class="meta">合同第 {{ display.contract_page }} 页 · 请核对原文</span>{% endif %}</div>
+            {% if display.online_queries %}<div class="query-todo"><strong>需要联网查询</strong><ul>{% for topic in display.online_queries %}<li>{{ topic }}</li>{% endfor %}</ul>{% if display.query_prerequisites %}<p>查询前还需确认：{{ display.query_prerequisites|join('、') }}</p>{% endif %}</div>{% endif %}
+            {% if display.missing_materials %}<div class="material-todo"><strong>还需补充</strong><ul>{% for source in display.missing_materials %}<li>{{ source }}</li>{% endfor %}</ul></div>{% endif %}
+            {% if research and human.research_status == 'pending' and not display.online_queries and not display.missing_materials %}<div class="material-todo"><strong>还需核实</strong>{{ research.query_topics|join('、') if research.query_topics else research.reason }}</div>{% endif %}
+            {% if package.item_error %}<p class="error">{{ package.item_error }}</p>{% endif %}
             {% if package.evidence_status == 'extraction_failed' %}<p class="retry-hint">如需重新尝试，可<a href="/contracts/{{ selected_contract.contract_id }}/evidence-review">新建取证任务</a>。</p>{% endif %}
-            {% if research and human.research_status == 'pending' %}<div class="next-action"><strong>还需查询：</strong>{{ research.query_topics|join('、') if research.query_topics else research.reason }}</div>{% endif %}
-            {% if human.decision %}<p class="saved-decision"><strong>人工结论：</strong>{% if human.decision == 'risk' %}有风险{% elif human.decision == 'no_obvious_risk' %}无明显风险{% else %}暂无法判断{% endif %}{% if human.opinion %} · {{ human.opinion }}{% endif %}</p>{% endif %}
+            {% if human.opinion %}<p class="saved-decision"><strong>人工意见：</strong>{{ human.opinion }}</p>{% endif %}
             <div class="item-actions">
-              <details class="source-details"><summary>查看规则与取证详情</summary><div class="detail-body">
+              <details class="source-details"><summary>查看依据与规则</summary><div class="detail-body">
                 <h4>规则原文</h4><p class="rule">{{ item.rule_text }}</p>
                 {% if package.evidence %}<h4>合同原文摘录 <span class="detail-note">机器检索结果，请核对原件</span></h4>{% for evidence in package.evidence %}<div class="evidence"><div class="meta">{% if evidence.page_idx is not none %}合同第 {{ evidence.page_idx + 1 }} 页{% else %}合同内容{% endif %}</div><div class="evidence-text">{{ evidence.evidence_text }}</div></div>{% endfor %}{% endif %}
                 {% if package.extracted_facts %}<h4>机器提取的信息 <span class="detail-note">请按合同原文核实</span></h4>{% for fact in package.extracted_facts %}<div class="fact"><strong>{{ fact.label }}</strong><span>{{ fact.value }}{% if fact.unit %} {{ fact.unit }}{% endif %}</span></div>{% endfor %}{% endif %}
+                {% if package.system_suggestion %}<h4>系统建议的核对重点</h4><p class="rule">{{ package.system_suggestion.suggestion }}</p>{% endif %}
                 {% if research %}<h4>需要人工查询和比对</h4><div class="research"><p>{{ research.reason }}</p>
                   {% if research.query_targets %}<div class="target-list"><strong>查询对象</strong>{% for target in research.query_targets %}<div class="target">{% for key,value in target.fields.items() %}<span>{{ identifier_label(key) }}：{{ value }}</span>{% endfor %}</div>{% endfor %}</div>{% endif %}
                   {% if research.missing_identifiers %}<p class="warning"><strong>查询前还缺：</strong>{% for key in research.missing_identifiers %}{{ identifier_label(key) }}{% if not loop.last %}、{% endif %}{% endfor %}</p>{% endif %}
@@ -121,17 +130,18 @@
                   {% if research.comparison_points %}<p><strong>比对重点：</strong>{{ research.comparison_points|join('、') }}</p>{% endif %}
                 </div>{% endif %}
               </div></details>
-              <details class="decision-details" {% if submitted %}open{% endif %}><summary>{% if human.human_review_status == 'completed' %}查看或修改人工结论{% else %}填写人工结论{% endif %}</summary>
+              <details class="decision-details" {% if submitted %}open{% endif %}><summary>{% if human.human_review_status == 'completed' %}修改人工结论{% else %}确认或修改结论{% endif %}</summary>
                 <form class="decision-form" action="/contracts/{{ selected_contract.contract_id }}/evidence-review/runs/{{ run.run_id }}/items/{{ item.item_id }}/decision" method="post">
-                  {% set decision_value = decision_input.get('decision', '') if submitted else (human.decision or '') %}
-                  {% set level_value = decision_input.get('risk_level', '') if submitted else (human.risk_level or '') %}
+                  {% set suggested_decision = {'risk': 'risk', 'no_obvious_risk': 'no_obvious_risk', 'needs_review': 'cannot_determine'}.get(package.system_suggestion.risk_status, '') if package.system_suggestion else '' %}
+                  {% set decision_value = decision_input.get('decision', '') if submitted else (human.decision or suggested_decision) %}
+                  {% set level_value = decision_input.get('risk_level', '') if submitted else (human.risk_level or (package.system_suggestion.risk_level if package.system_suggestion else '')) %}
                   {% set research_value = decision_input.get('research_status', human.research_status) if submitted else human.research_status %}
-                  {% set opinion_value = decision_input.get('opinion', '') if submitted else human.opinion %}
+                  {% set opinion_value = decision_input.get('opinion', '') if submitted else (human.opinion or (package.system_suggestion.finding if package.system_suggestion else '')) %}
                   {% set notes_value = decision_input.get('research_notes', '') if submitted else human.research_notes %}
                   <label><span>人工结论</span><select name="decision"><option value="" {% if not decision_value %}selected{% endif %}>继续待判断</option><option value="risk" {% if decision_value == 'risk' %}selected{% endif %}>有风险</option><option value="no_obvious_risk" {% if decision_value == 'no_obvious_risk' %}selected{% endif %}>无明显风险</option><option value="cannot_determine" {% if decision_value == 'cannot_determine' %}selected{% endif %}>暂无法判断</option></select></label>
                   <label><span>风险等级（可空）</span><select name="risk_level"><option value="" {% if not level_value %}selected{% endif %}>未分级</option><option value="high" {% if level_value == 'high' %}selected{% endif %}>高</option><option value="medium" {% if level_value == 'medium' %}selected{% endif %}>中</option><option value="low" {% if level_value == 'low' %}selected{% endif %}>低</option></select></label>
                   <label><span>查询状态</span><select name="research_status"><option value="not_required" {% if research_value == 'not_required' %}selected{% endif %}>无需查询</option><option value="pending" {% if research_value == 'pending' %}selected{% endif %}>待查询</option><option value="completed" {% if research_value == 'completed' %}selected{% endif %}>已完成查询</option></select></label>
-                  <label class="wide"><span>人工意见</span><textarea name="opinion">{{ opinion_value }}</textarea></label>
+                  <label class="wide"><span>人工意见{% if package.system_suggestion and human.human_review_status != 'completed' %}（已填入系统建议，请核对）{% endif %}</span><textarea name="opinion">{{ opinion_value }}</textarea></label>
                   <label class="wide"><span>查询记录</span><textarea name="research_notes">{{ notes_value }}</textarea></label>
                   <input type="hidden" name="expected_updated_at" value="{{ human.updated_at }}">
                   <div class="submit"><button type="submit">保存人工判断</button></div>
@@ -146,14 +156,13 @@
   <script>
     const runId = document.body.dataset.runId;
     const runStatus = document.body.dataset.runStatus;
-    if (runId && ['queued','processing'].includes(runStatus)) {
+    if (runId && (['queued','processing'].includes(runStatus) || document.body.dataset.suggestionStatus === 'processing')) {
       const endpoint = '/api/contracts/{{ selected_contract.contract_id }}/evidence-review/runs/{{ run_id or "" }}';
       setTimeout(async () => { const response = await fetch(endpoint,{cache:'no-store'}); if(response.ok) location.reload(); }, 3000);
     }
-    const filters = ['evidence-status-filter','research-status-filter','human-status-filter'].map((id)=>document.getElementById(id)).filter(Boolean);
-    const filterFields = {'evidence-status-filter':'evidenceStatus','research-status-filter':'researchStatus','human-status-filter':'humanStatus'};
-    function applyFilters(){let count=0;document.querySelectorAll('#evidence-items .item').forEach((card)=>{card.hidden=filters.some((filter)=>filter.value && card.dataset[filterFields[filter.id]] !== filter.value);if(!card.hidden)count++;});const label=document.getElementById('visible-count');if(label)label.textContent=`显示 ${count} 项`;}
-    filters.forEach((filter)=>filter.addEventListener('change',applyFilters));
+    const resultFilter = document.getElementById('result-filter');
+    function applyFilters(){let count=0;document.querySelectorAll('#evidence-items .item').forEach((card)=>{card.hidden=Boolean(resultFilter.value && card.dataset.resultStatus !== resultFilter.value);if(!card.hidden)count++;});const label=document.getElementById('visible-count');if(label)label.textContent=`显示 ${count} 项`;}
+    if(resultFilter)resultFilter.addEventListener('change',applyFilters);
   </script>
 </body>
 </html>

@@ -107,6 +107,22 @@ class FixedEvidenceService:
                 ),
                 item_error=None,
             ),
+            EvidencePackage(
+                rule_item_id="assessed",
+                evidence_status="found",
+                evidence=[
+                    {
+                        "source_object_index": 19,
+                        "page_idx": 5,
+                        "node_type": "text",
+                        "evidence_text": "乙方承担全部延期责任",
+                    }
+                ],
+                extracted_facts=[],
+                missing_sources=[],
+                research_package=None,
+                item_error=None,
+            ),
         ]
         for index, item in enumerate(items, start=1):
             if progress_callback:
@@ -120,6 +136,17 @@ class FixedEvidenceService:
                 )
         return outputs
 
+    def suggest_item(self, item, package):
+        assert item.item_id == "assessed"
+        return {
+            "risk_status": "risk",
+            "risk_level": None,
+            "evidence_status": "found",
+            "finding": "合同约定乙方承担全部延期责任",
+            "risk_description": "责任分配需要按规则核对",
+            "suggestion": "核对延期责任范围",
+        }
+
 
 def parsed_rules() -> dict:
     items = []
@@ -127,6 +154,7 @@ def parsed_rules() -> dict:
         ("found", "一-1", "核验相对方企业状态", "hybrid"),
         ("not-found", "一-2", "核验付款保障条款", "contract"),
         ("source-missing", "二-1", "核验内部立项审批", "internal_material"),
+        ("assessed", "三-1", "核验延期责任", "contract"),
     ]:
         items.append(
             {
@@ -150,8 +178,8 @@ def parsed_rules() -> dict:
         "review_items": items,
         "summary": {
             "section_count": 0,
-            "review_item_count": 3,
-            "review_check_count": 3,
+            "review_item_count": 4,
+            "review_check_count": 4,
             "process_control_count": 0,
         },
     }
@@ -295,12 +323,10 @@ def test_ready_page_displays_evidence_facts_missing_sources_and_research(
         assert text in response.text
     for forbidden in ["risk_status", "风险说明", "修改建议"]:
         assert forbidden not in response.text
-    assert 'id="evidence-status-filter"' in response.text
-    assert 'id="research-status-filter"' in response.text
-    assert 'id="human-status-filter"' in response.text
+    assert 'id="result-filter"' in response.text
 
 
-def test_result_page_explains_provisional_evidence_and_collapses_details(tmp_path: Path):
+def test_result_page_leads_with_contract_situation_and_next_queries(tmp_path: Path):
     client, _, rule_set = build_client(tmp_path)
     created = client.post(
         "/contracts/c1/evidence-review/runs",
@@ -312,15 +338,55 @@ def test_result_page_explains_provisional_evidence_and_collapses_details(tmp_pat
     page = client.get(f"/contracts/c1/evidence-review?run_id={run_id}")
 
     assert page.status_code == 200
-    assert "校验结果" in page.text
-    assert "候选合同片段" in page.text
-    assert "不能直接作为风险结论" in page.text
-    assert "取证失败" in page.text
+    assert "合同检查结果" in page.text
+    assert "待联网查询" in page.text
+    assert "待补资料" in page.text
+    assert "合同情况" in page.text
+    assert "需要联网查询" in page.text
+    assert "企业登记状态" in page.text
+    assert "规则检查项" not in page.text
+    assert "取证状态汇总" not in page.text
+    assert "待人工判断" not in page.text
+    assert 'id="result-filter"' in page.text
+    assert 'id="research-status-filter"' not in page.text
     assert '<details class="source-details"' in page.text
     assert '<details class="decision-details"' in page.text
     assert "统一社会信用代码" in page.text
     assert "credit_code" not in page.text
     assert "来源对象 12" not in page.text
+
+
+def test_existing_result_can_generate_system_advice_without_overwriting_human_state(
+    tmp_path: Path,
+):
+    client, _, rule_set = build_client(tmp_path)
+    created = client.post(
+        "/contracts/c1/evidence-review/runs",
+        data={"rule_set_id": rule_set.rule_set_id},
+        follow_redirects=False,
+    )
+    run_id = parse_qs(urlparse(created.headers["location"]).query)["run_id"][0]
+    result_url = f"/contracts/c1/evidence-review?run_id={run_id}"
+
+    before = client.get(result_url)
+    assert "为已有结果生成系统建议" in before.text
+
+    submitted = client.post(
+        f"/contracts/c1/evidence-review/runs/{run_id}/suggestions",
+        follow_redirects=False,
+    )
+    after = client.get(result_url)
+
+    assert submitted.status_code == 303
+    assert "疑似有风险" in after.text
+    assert "合同约定乙方承担全部延期责任" in after.text
+    assert "系统建议" in after.text
+    assert 'value="risk" selected' in after.text
+    assert "人工意见（已填入系统建议，请核对）" in after.text
+    assert "为已有结果生成系统建议" not in after.text
+    payload = client.get(f"/api/contracts/c1/evidence-review/runs/{run_id}").json()
+    assert payload["items"][3]["evidence_package"]["system_suggestion"]["risk_status"] == "risk"
+    assert payload["items"][3]["human_decision"]["human_review_status"] == "pending"
 
 
 def test_status_summary_includes_failed_items():
@@ -352,7 +418,7 @@ def test_status_api_is_pollable_and_cross_contract_is_hidden(tmp_path: Path):
     hidden = client.get(f"/api/contracts/other/evidence-review/runs/{run_id}")
 
     assert response.status_code == 200
-    assert response.json()["progress"]["completed"] == 3
+    assert response.json()["progress"]["completed"] == 4
     assert response.json()["items"][0]["evidence_package"]["evidence"][0] == {
         "source_object_index": 12,
         "page_idx": 4,

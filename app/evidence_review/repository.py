@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from app.contract_review.schemas import RiskDecision
 from app.evidence_review.schemas import HumanDecision
 
 
@@ -586,6 +587,92 @@ class EvidenceReviewRepository:
             ).fetchall()
         return [self._evidence_item_from_row(row) for row in rows]
 
+    def claim_suggestion_generation(self, run_id: str, *, total: int) -> bool:
+        with self._write_lock, self._connection() as connection:
+            row = connection.execute(
+                "SELECT status, progress_json FROM evidence_review_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(run_id)
+            if row["status"] != "ready":
+                raise EvidenceRunTransitionError(run_id)
+            progress = json.loads(row["progress_json"])
+            if progress.get("suggestion_status") == "processing":
+                return False
+            progress.update(
+                suggestion_status="processing",
+                suggestion_completed=0,
+                suggestion_total=total,
+            )
+            connection.execute(
+                "UPDATE evidence_review_runs SET progress_json = ? WHERE run_id = ?",
+                (json.dumps(progress, ensure_ascii=False), run_id),
+            )
+        return True
+
+    def update_suggestion_progress(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        completed: int,
+        total: int,
+    ) -> None:
+        if status not in {"processing", "completed", "partial", "failed"}:
+            raise ValueError("unsupported suggestion status")
+        with self._write_lock, self._connection() as connection:
+            row = connection.execute(
+                "SELECT status, progress_json FROM evidence_review_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if row is None or row["status"] != "ready":
+                raise EvidenceRunTransitionError(run_id)
+            progress = json.loads(row["progress_json"])
+            progress.update(
+                suggestion_status=status,
+                suggestion_completed=completed,
+                suggestion_total=total,
+            )
+            connection.execute(
+                "UPDATE evidence_review_runs SET progress_json = ? WHERE run_id = ?",
+                (json.dumps(progress, ensure_ascii=False), run_id),
+            )
+
+    def save_system_suggestion(
+        self,
+        run_id: str,
+        rule_item_id: str,
+        suggestion: RiskDecision | dict[str, Any],
+    ) -> bool:
+        validated = RiskDecision.model_validate(suggestion)
+        with self._write_lock, self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT item.evidence_package_json, run.status
+                FROM evidence_review_items AS item
+                JOIN evidence_review_runs AS run ON run.run_id = item.run_id
+                WHERE item.run_id = ? AND item.rule_item_id = ?
+                """,
+                (run_id, rule_item_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError(rule_item_id)
+            if row["status"] != "ready":
+                raise EvidenceRunTransitionError(run_id)
+            package = json.loads(row["evidence_package_json"])
+            if package.get("system_suggestion") is not None:
+                return False
+            package["system_suggestion"] = validated.model_dump(mode="json")
+            connection.execute(
+                """
+                UPDATE evidence_review_items SET evidence_package_json = ?
+                WHERE run_id = ? AND rule_item_id = ?
+                """,
+                (json.dumps(package, ensure_ascii=False), run_id, rule_item_id),
+            )
+        return True
+
     def get_evidence_decision(
         self,
         run_id: str,
@@ -747,4 +834,20 @@ class EvidenceReviewRepository:
                     reason,
                 ),
             )
-        return cursor.rowcount
+            interrupted_count = cursor.rowcount
+            rows = connection.execute(
+                """
+                SELECT run_id, progress_json FROM evidence_review_runs
+                WHERE status = 'ready'
+                """
+            ).fetchall()
+            for row in rows:
+                saved_progress = json.loads(row["progress_json"])
+                if saved_progress.get("suggestion_status") != "processing":
+                    continue
+                saved_progress["suggestion_status"] = "failed"
+                connection.execute(
+                    "UPDATE evidence_review_runs SET progress_json = ? WHERE run_id = ?",
+                    (json.dumps(saved_progress, ensure_ascii=False), row["run_id"]),
+                )
+        return interrupted_count

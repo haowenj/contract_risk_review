@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.contract_review.schemas import RiskDecision
+
 EvidenceScope = Literal[
     "contract",
     "internal_material",
@@ -178,6 +180,7 @@ class EvidencePackage(StrictModel):
     missing_sources: list[str]
     research_package: ResearchPackage | None
     item_error: str | None
+    system_suggestion: RiskDecision | None = None
 
     @model_validator(mode="after")
     def validate_fact_references(self) -> EvidencePackage:

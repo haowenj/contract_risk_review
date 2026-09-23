@@ -34,11 +34,14 @@ from app.evaluation_service import (
 )
 from app.evidence_review.presentation import (
     identifier_label,
+    present_result_item,
     summarize_evidence_statuses,
+    summarize_result_items,
 )
 from app.evidence_review.repository import (
     DecisionConflictError,
     EvidenceReviewRepository,
+    EvidenceRunTransitionError,
     RuleSetRecord,
     RuleSetTransitionError,
 )
@@ -244,6 +247,19 @@ def create_app(
         active_rule_sets = [
             value for value in all_rule_sets if value.status == "active"
         ]
+        presented_items = (
+            [present_result_item(entry) for entry in run_payload["items"]]
+            if run_payload and run_payload["status"] == "ready"
+            else []
+        )
+        suggestion_missing_count = sum(
+            entry["evidence_package"]["evidence_status"] == "found"
+            and not entry["evidence_package"].get("missing_sources")
+            and entry["evidence_package"].get("research_package") is None
+            and entry["evidence_package"].get("system_suggestion") is None
+            and entry["human_decision"]["human_review_status"] == "pending"
+            for entry in (run_payload["items"] if presented_items else [])
+        )
         return templates.TemplateResponse(
             request=request,
             name="evidence_review.html",
@@ -267,6 +283,11 @@ def create_app(
                     if run_payload and run_payload["status"] == "ready"
                     else []
                 ),
+                "result_by_id": {
+                    value["rule_item_id"]: value for value in presented_items
+                },
+                "result_summary": summarize_result_items(presented_items),
+                "suggestion_missing_count": suggestion_missing_count,
                 "identifier_label": identifier_label,
             },
         )
@@ -801,6 +822,36 @@ def create_app(
                 f"/contracts/{contract_id}/evidence-review"
                 f"?run_id={run.run_id}"
             ),
+            status_code=303,
+        )
+
+    @application.post(
+        "/contracts/{contract_id}/evidence-review/runs/{run_id}/suggestions"
+    )
+    def generate_evidence_review_suggestions(
+        contract_id: str,
+        run_id: str,
+        background_tasks: BackgroundTasks,
+    ) -> Response:
+        try:
+            started = active_evidence_review_web_service.request_suggestions(
+                contract_id, run_id
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=404, detail="evidence review run not found"
+            ) from exc
+        except EvidenceRunTransitionError as exc:
+            raise HTTPException(
+                status_code=409, detail="result is not ready"
+            ) from exc
+        if started:
+            background_tasks.add_task(
+                active_evidence_review_web_service.generate_missing_suggestions,
+                run_id,
+            )
+        return RedirectResponse(
+            url=f"/contracts/{contract_id}/evidence-review?run_id={run_id}",
             status_code=303,
         )
 

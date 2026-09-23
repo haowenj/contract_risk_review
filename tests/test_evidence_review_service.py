@@ -105,6 +105,69 @@ def evidence(index: int, text: str, *, page_idx: int = 0) -> dict:
     }
 
 
+def test_contract_evidence_gets_a_grounded_system_suggestion():
+    query = "合同相对方的名称和统一社会信用代码"
+    contract = FakeContractService({query: [evidence(7, "乙方应承担全部延期责任")]})
+    review_llm = FakeLLM([
+        {
+            "risk_status": "risk",
+            "risk_level": None,
+            "evidence_status": "found",
+            "finding": "合同约定乙方承担全部延期责任",
+            "risk_description": "责任分配可能与规则要求不符",
+            "suggestion": "人工核对责任条款",
+        }
+    ])
+    item = rule_item(
+        evidence_scope="contract",
+        fact_requirements=[],
+        research_requirements=[],
+    )
+
+    package = EvidenceReviewService(
+        contract_service=contract,
+        fact_llm=FakeLLM([]),
+        review_llm=review_llm,
+    ).extract_item("c1", item)
+
+    assert package.evidence_status == "found"
+    assert package.system_suggestion.risk_status == "risk"
+    assert package.system_suggestion.finding == "合同约定乙方承担全部延期责任"
+    assert "乙方应承担全部延期责任" in review_llm.prompts[0]
+
+
+def test_pending_external_query_does_not_get_a_conclusive_suggestion():
+    query = "合同相对方的名称和统一社会信用代码"
+    review_llm = FakeLLM([])
+    item = rule_item(fact_requirements=[])
+    package = EvidenceReviewService(
+        contract_service=FakeContractService({query: [evidence(7, "乙方为示例公司")]}),
+        fact_llm=FakeLLM([]),
+        review_llm=review_llm,
+    ).extract_item("c1", item)
+
+    assert package.evidence_status == "found"
+    assert package.research_package.research_status == "pending"
+    assert package.system_suggestion is None
+    assert review_llm.prompts == []
+
+
+def test_suggestion_failure_keeps_retrieved_contract_evidence():
+    query = "合同相对方的名称和统一社会信用代码"
+    package = EvidenceReviewService(
+        contract_service=FakeContractService({query: [evidence(7, "合同条款原文")]}),
+        fact_llm=FakeLLM([]),
+        review_llm=FakeLLM([RuntimeError("model unavailable")]),
+    ).extract_item(
+        "c1",
+        rule_item(evidence_scope="contract", fact_requirements=[], research_requirements=[]),
+    )
+
+    assert package.evidence_status == "found"
+    assert package.evidence[0].evidence_text == "合同条款原文"
+    assert package.system_suggestion is None
+
+
 def test_hybrid_item_returns_evidence_facts_and_pending_research_without_risk():
     query = "合同相对方的名称和统一社会信用代码"
     contract = FakeContractService(
