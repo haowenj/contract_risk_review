@@ -11,6 +11,7 @@ from langchain_openai import ChatOpenAI
 from llama_index.core import VectorStoreIndex
 from llama_index.core.schema import MetadataMode
 
+from app.llm_gateway import invoke_llm
 from mineru_to_nodes import (
     INPUT_PATH,
     RETRIEVAL_CONTEXT_PATH,
@@ -278,8 +279,9 @@ def select_evidence(
 
     active_llm = build_selector_llm() if llm is None else llm
     try:
-        response = active_llm.invoke(
-            _selector_prompt(query, _build_evidence_text(reranked_nodes))
+        response = invoke_llm(
+            active_llm,
+            _selector_prompt(query, _build_evidence_text(reranked_nodes)),
         )
         payload = _parse_json_value(response)
         if isinstance(payload, list):
@@ -327,8 +329,9 @@ def generate_answer(
 
     active_llm = build_answer_llm() if llm is None else llm
     try:
-        response = active_llm.invoke(
-            _answer_prompt(query, _build_evidence_text(selected_nodes))
+        response = invoke_llm(
+            active_llm,
+            _answer_prompt(query, _build_evidence_text(selected_nodes)),
         )
         payload = _parse_json_object(response)
         answer = payload.get("answer")

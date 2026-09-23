@@ -16,7 +16,7 @@ from app.contract_review.schemas import (
     parse_llm_response,
 )
 from app.contract_review.state import ContractReviewState
-
+from app.llm_gateway import invoke_llm
 
 type ProgressCallback = Callable[[str, dict[str, Any]], None]
 
@@ -44,8 +44,9 @@ class ContractReviewNodes:
         state: ContractReviewState,
     ) -> dict[str, Any]:
         try:
-            response = self.parse_llm.invoke(
-                build_parse_review_rules_prompt(state["review_rule_text"])
+            response = invoke_llm(
+                self.parse_llm,
+                build_parse_review_rules_prompt(state["review_rule_text"]),
             )
             parsed = parse_llm_response(response, ReviewItemList)
         except Exception as exc:
@@ -147,8 +148,9 @@ class ContractReviewNodes:
         item = state["review_items"][state["current_item_index"]]
         try:
             evidence = state["retrieved_evidence"]
-            response = self.review_llm.invoke(
-                build_review_item_prompt(item, evidence)
+            response = invoke_llm(
+                self.review_llm,
+                build_review_item_prompt(item, evidence),
             )
             decision = parse_llm_response(response, RiskDecision)
         except Exception as exc:

@@ -5,7 +5,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-
 EvidenceScope = Literal[
     "contract",
     "internal_material",
@@ -132,6 +131,12 @@ class RuleParseResult(StrictModel):
         ):
             raise ValueError("parent section ids must reference existing sections")
         return self
+
+
+class RuleParseChunkResult(RuleParseResult):
+    """A batch may contain only headings; the merged document may not."""
+
+    review_items: list[RuleItem]
 
 
 class Evidence(StrictModel):

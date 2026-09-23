@@ -16,7 +16,7 @@ from app.image_schemas import (
     ImageSchemaError,
     validate_image_extraction,
 )
-
+from app.llm_gateway import invoke_llm
 
 IMAGE_EXTRACTION_PROMPT = """请理解这张合同图片，并严格输出 JSON。
 
@@ -104,7 +104,7 @@ class ImageUnderstandingService:
                 },
             ]
         )
-        response = self._llm.invoke([message])
+        response = invoke_llm(self._llm, [message])
         try:
             payload = _response_payload(response)
         except ValueError as exc:

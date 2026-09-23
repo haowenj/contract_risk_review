@@ -60,3 +60,18 @@ def test_rule_parse_prompt_does_not_contain_sample_specific_assumptions():
 
     forbidden = ["42项", "四十二项", "中建", "负面清单必须", "投标阶段必须"]
     assert all(value not in prompt for value in forbidden)
+
+
+def test_rule_parse_prompt_spells_out_nested_response_contract():
+    prompt = build_rule_parse_prompt(
+        ExtractedRuleDocument(
+            title_hint="规则",
+            blocks=[{"page_number": 1, "text": "核验合同相对方"}],
+            page_count=1,
+        )
+    )
+
+    assert "fact_requirements 必须是对象数组" in prompt
+    assert "research_requirements 必须是对象数组" in prompt
+    assert "review_items 中禁止 section_id" in prompt
+    assert "retrieval_queries 至少包含一个检索问题" in prompt

@@ -18,7 +18,7 @@ from app.evidence_review.schemas import (
     RuleItem,
     StrictModel,
 )
-
+from app.llm_gateway import invoke_llm
 
 LOGGER = logging.getLogger(__name__)
 FACT_EXTRACTION_TIMEOUT_SECONDS = 120.0
@@ -170,8 +170,9 @@ class EvidenceReviewService:
         if evidence and item.fact_requirements:
             extracted = FactExtractionResult.model_validate_json(
                 _response_text(
-                    self.fact_llm.invoke(
-                        build_fact_extraction_prompt(item, evidence)
+                    invoke_llm(
+                        self.fact_llm,
+                        build_fact_extraction_prompt(item, evidence),
                     )
                 )
             )

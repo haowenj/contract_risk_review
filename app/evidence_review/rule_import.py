@@ -6,6 +6,7 @@ import logging
 import os
 import re
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,9 @@ from app.evidence_review.repository import (
     EvidenceReviewRepository,
     RuleSetRecord,
 )
-from app.evidence_review.schemas import RuleParseResult
+from app.evidence_review.rule_batching import RuleParseBatch, split_rule_document
+from app.evidence_review.schemas import RuleParseChunkResult, RuleParseResult
+from app.llm_gateway import MAX_CONCURRENT_LLM_CALLS, invoke_llm
 from mineru_raw_parse import run_parse
 
 LOGGER = logging.getLogger(__name__)
@@ -131,6 +134,8 @@ class RuleDocumentExtractor:
         for value in payload:
             if not isinstance(value, dict):
                 continue
+            if value.get("type") not in {None, "text", "paragraph_title"}:
+                continue
             text = value.get("text")
             if not isinstance(text, str) or not text.strip():
                 text = value.get("content")
@@ -138,7 +143,13 @@ class RuleDocumentExtractor:
                 continue
             page_idx = value.get("page_idx")
             page_number = page_idx + 1 if isinstance(page_idx, int) else 1
-            blocks.append({"page_number": page_number, "text": text.strip()})
+            block: dict[str, object] = {
+                "page_number": page_number,
+                "text": text.strip(),
+            }
+            if isinstance(value.get("text_level"), int):
+                block["text_level"] = value["text_level"]
+            blocks.append(block)
         if not blocks:
             raise ValueError("PDF 规则文件没有可用文本。")
         return ExtractedRuleDocument(
@@ -154,7 +165,7 @@ def build_rule_parse_llm() -> Any:
         "json_schema": {
             "name": "contract_risk_rule_parse",
             "strict": True,
-            "schema": RuleParseResult.model_json_schema(),
+            "schema": RuleParseChunkResult.model_json_schema(),
         },
     }
     return ChatOpenAI(
@@ -162,6 +173,7 @@ def build_rule_parse_llm() -> Any:
         api_key=os.environ["LLM_API_KEY"],
         base_url=os.environ["LLM_BASE_URL"],
         temperature=0,
+        max_tokens=8192,
         timeout=RULE_PARSE_TIMEOUT_SECONDS,
         max_retries=0,
         reasoning_effort="none",
@@ -494,6 +506,114 @@ def _normalize_rule_parse_payload(payload: object) -> object:
     return normalized
 
 
+def _merge_rule_batches(
+    chunks: list[RuleParseChunkResult],
+) -> RuleParseResult:
+    if len(chunks) == 1:
+        return RuleParseResult.model_validate(chunks[0].model_dump(mode="json"))
+
+    sections: list[dict[str, Any]] = []
+    sections_by_key: dict[tuple[Any, ...], dict[str, Any]] = {}
+    items: list[dict[str, Any]] = []
+    items_by_key: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+
+    for chunk in chunks:
+        local_sections = {section.section_id: section for section in chunk.sections}
+
+        def section_key(
+            section_id: str,
+            seen: set[str],
+            local_sections: dict[str, Any] = local_sections,
+        ) -> tuple[Any, ...]:
+            if section_id in seen:
+                raise ValueError("规则章节存在循环引用")
+            section = local_sections[section_id]
+            parent_key = (
+                section_key(section.parent_section_id, seen | {section_id})
+                if section.parent_section_id else ()
+            )
+            return parent_key + ((section.source_number, section.title),)
+
+        for section in sorted(
+            chunk.sections,
+            key=lambda value: len(section_key(value.section_id, set())),
+        ):
+            key = section_key(section.section_id, set())
+            existing = sections_by_key.get(key)
+            if existing is None:
+                parent_key = key[:-1]
+                parent = sections_by_key.get(parent_key) if parent_key else None
+                if parent_key and parent is None:
+                    raise ValueError("规则章节缺少父章节")
+                existing = section.model_dump(mode="json")
+                existing["section_id"] = f"section-{len(sections) + 1}"
+                existing["parent_section_id"] = (
+                    parent["section_id"] if parent else None
+                )
+                existing["level"] = len(key)
+                sections_by_key[key] = existing
+                sections.append(existing)
+            else:
+                existing["source_pages"] = sorted(
+                    set(existing["source_pages"]) | set(section.source_pages)
+                )
+
+        for item in chunk.review_items:
+            key = (
+                tuple(item.section_path),
+                item.source_number,
+                " ".join(item.rule_text.split()),
+            )
+            existing = next(
+                (
+                    candidate
+                    for candidate in items_by_key.get(key, [])
+                    if any(
+                        abs(existing_page - incoming_page) <= 1
+                        for existing_page in candidate["source_pages"]
+                        for incoming_page in item.source_pages
+                    )
+                ),
+                None,
+            )
+            if existing is None:
+                existing = item.model_dump(mode="json")
+                existing["item_id"] = f"item-{len(items) + 1}"
+                items_by_key.setdefault(key, []).append(existing)
+                items.append(existing)
+            else:
+                incoming = item.model_dump(mode="json")
+                for field in ("item_kind", "evidence_scope", "decision_mode"):
+                    if existing[field] != incoming[field]:
+                        raise ValueError("跨批规则分类不一致")
+                existing["source_pages"] = sorted(
+                    set(existing["source_pages"]) | set(item.source_pages)
+                )
+                existing["retrieval_queries"] = list(dict.fromkeys(
+                    existing["retrieval_queries"] + incoming["retrieval_queries"]
+                ))
+                known_facts = {
+                    fact["fact_key"]: fact
+                    for fact in existing["fact_requirements"]
+                }
+                for fact in incoming["fact_requirements"]:
+                    previous = known_facts.get(fact["fact_key"])
+                    if previous is None:
+                        existing["fact_requirements"].append(fact)
+                        known_facts[fact["fact_key"]] = fact
+                    elif previous != fact:
+                        raise ValueError("跨批事实字段定义不一致")
+                for requirement in incoming["research_requirements"]:
+                    if requirement not in existing["research_requirements"]:
+                        existing["research_requirements"].append(requirement)
+
+    return RuleParseResult.model_validate({
+        "document_title": chunks[0].document_title,
+        "sections": sections,
+        "review_items": items,
+    })
+
+
 class RuleSetImportService:
     def __init__(
         self,
@@ -532,10 +652,27 @@ class RuleSetImportService:
             # document type defined in this module.
             from app.evidence_review.prompts import build_rule_parse_prompt
 
-            response = self.parse_llm.invoke(build_rule_parse_prompt(document))
-            raw_payload = json.loads(_response_text(response))
-            normalized_payload = _normalize_rule_parse_payload(raw_payload)
-            parsed = RuleParseResult.model_validate(normalized_payload)
+            batches = split_rule_document(document)
+
+            def parse_batch(batch: RuleParseBatch) -> RuleParseChunkResult:
+                prompt = build_rule_parse_prompt(
+                    batch.document,
+                    context_before=batch.context_before,
+                    context_after=batch.context_after,
+                )
+                response = invoke_llm(self.parse_llm, prompt)
+                metadata = getattr(response, "response_metadata", {}) or {}
+                if metadata.get("finish_reason") == "length":
+                    raise ValueError("规则解析模型输出达到 Token 上限")
+                raw_payload = json.loads(_response_text(response))
+                normalized_payload = _normalize_rule_parse_payload(raw_payload)
+                return RuleParseChunkResult.model_validate(normalized_payload)
+
+            with ThreadPoolExecutor(
+                max_workers=min(MAX_CONCURRENT_LLM_CALLS, len(batches))
+            ) as executor:
+                chunks = list(executor.map(parse_batch, batches))
+            parsed = _merge_rule_batches(chunks)
             parsed_json = parsed.model_dump(mode="json")
             parsed_json["schema_version"] = "1.0"
             parsed_json["source"] = {
