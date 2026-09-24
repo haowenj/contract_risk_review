@@ -18,6 +18,10 @@ class RuleSetTransitionError(RuntimeError):
     pass
 
 
+class RuleSetDeletionNotAllowedError(RuntimeError):
+    pass
+
+
 class EvidenceRunTransitionError(RuntimeError):
     pass
 
@@ -294,6 +298,26 @@ class EvidenceReviewRepository:
                 "SELECT * FROM review_rule_sets ORDER BY created_at DESC"
             ).fetchall()
         return [self._from_row(row) for row in rows]  # type: ignore[misc]
+
+    def delete_finished_rule_set(self, rule_set_id: str) -> RuleSetRecord:
+        with self._write_lock, self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM review_rule_sets WHERE rule_set_id = ?",
+                (rule_set_id,),
+            ).fetchone()
+            record = self._from_row(row)
+            if record is None:
+                raise KeyError(rule_set_id)
+            if record.status in {"queued", "processing"}:
+                raise RuleSetDeletionNotAllowedError(
+                    "规则文件仍在解析，完成后才能删除。"
+                )
+            connection.execute(
+                "DELETE FROM review_rule_sets WHERE rule_set_id = ?",
+                (rule_set_id,),
+            )
+        return record
 
     def _transition(
         self,

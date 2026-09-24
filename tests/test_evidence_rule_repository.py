@@ -77,3 +77,40 @@ def test_failed_rule_set_keeps_safe_error_text(tmp_path: Path):
     assert failed.status == "failed"
     assert failed.error_message == "规则文件解析失败"
 
+
+def test_deleting_finished_rule_set_keeps_existing_review_snapshot(tmp_path: Path):
+    repository = EvidenceReviewRepository(tmp_path / "contracts.db")
+    record = repository.create_rule_set(
+        name="规则", source_filename="rules.md",
+        source_path=tmp_path / "rules.md", source_sha256="abc",
+    )
+    repository.mark_rule_set_processing(record.rule_set_id)
+    repository.mark_rule_set_draft(record.rule_set_id, parsed_rules())
+    run = repository.create_evidence_run(
+        contract_id="contract-1",
+        rule_set_id=record.rule_set_id,
+        rule_snapshot=parsed_rules(),
+    )
+
+    assert hasattr(repository, "delete_finished_rule_set")
+    repository.delete_finished_rule_set(record.rule_set_id)
+
+    assert repository.get_rule_set(record.rule_set_id) is None
+    assert repository.get_evidence_run(run.run_id).rule_snapshot == parsed_rules()
+
+
+def test_deleting_rule_set_rejects_queued_and_processing(tmp_path: Path):
+    repository = EvidenceReviewRepository(tmp_path / "contracts.db")
+    record = repository.create_rule_set(
+        name="规则", source_filename="rules.md",
+        source_path=tmp_path / "rules.md", source_sha256="abc",
+    )
+
+    assert hasattr(repository, "delete_finished_rule_set")
+    with pytest.raises(RuntimeError):
+        repository.delete_finished_rule_set(record.rule_set_id)
+    repository.mark_rule_set_processing(record.rule_set_id)
+    with pytest.raises(RuntimeError):
+        repository.delete_finished_rule_set(record.rule_set_id)
+
+    assert repository.get_rule_set(record.rule_set_id) is not None

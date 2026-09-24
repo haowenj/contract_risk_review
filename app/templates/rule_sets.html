@@ -24,9 +24,20 @@
     ul { list-style:none; padding:0; display:grid; gap:10px; }
     .row { padding:17px 20px; display:flex; align-items:center; justify-content:space-between; gap:20px; }
     .row strong,.row small { display:block; }
+    .row-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .delete-trigger { min-height:34px; padding:5px 10px; border:1px solid #e6b8b3; background:white; color:#a8372f; }
     .status { font-weight:700; }
     .status-draft { color:#b45309; } .status-active { color:#15803d; } .status-failed { color:#b91c1c; } .status-processing,.status-queued { color:#2563eb; }
     .empty { text-align:center; padding:36px; border:1px dashed #aebed0; border-radius:12px; color:#637189; }
+    dialog { width:min(440px,calc(100% - 32px)); border:0; border-radius:14px; padding:0; box-shadow:0 24px 64px #10203840; }
+    dialog::backdrop { background:#17203380; }
+    .delete-dialog { padding:24px; }
+    .delete-dialog h2 { margin:0 0 12px; }
+    .delete-dialog p { margin:0 0 18px; }
+    .delete-dialog footer { display:flex; justify-content:flex-end; gap:10px; }
+    .delete-dialog .cancel { background:#eef3f8; color:#172033; }
+    .delete-dialog .confirm { background:#a8372f; }
+    button:disabled { cursor:not-allowed; opacity:.65; }
     @media(max-width:720px){ form{grid-template-columns:1fr}.row{align-items:flex-start;flex-direction:column}main{width:calc(100% - 24px)} }
   </style>
   {% include "_upload_feedback_style.html" %}
@@ -47,19 +58,64 @@
     </section>
     <h2>规则列表</h2>
     {% set status_labels = {'queued':'排队中','processing':'解析中','draft':'待确认启用','active':'已启用','failed':'解析失败'} %}
-    <ul>
+    <ul id="rule-set-list">
       {% for item in rule_sets %}
         <li class="row">
           <div><strong>{{ item.name }} · v{{ item.version }}</strong><small class="muted">{{ item.source_filename }} · {{ item.created_at }}</small></div>
-          <div><span class="status status-{{ item.status }}">{{ status_labels.get(item.status, item.status) }}</span>　<a href="/rule-sets/{{ item.rule_set_id }}">查看规则</a></div>
+          <div class="row-actions"><span class="status status-{{ item.status }}">{{ status_labels.get(item.status, item.status) }}</span><a href="/rule-sets/{{ item.rule_set_id }}">查看规则</a>{% if item.status in ['draft', 'active', 'failed'] %}<button class="delete-trigger" type="button" data-delete-rule-set-id="{{ item.rule_set_id }}" data-delete-rule-set-name="{{ item.name }} · v{{ item.version }}">删除</button>{% endif %}</div>
         </li>
       {% else %}<li class="empty">还没有规则集。</li>{% endfor %}
     </ul>
   </main>
+  <dialog id="delete-rule-dialog" aria-labelledby="delete-rule-title">
+    <div class="delete-dialog">
+      <h2 id="delete-rule-title">删除规则版本</h2>
+      <p>确定删除 <strong id="delete-rule-name"></strong> 吗？上传文件和解析结果将一并删除，无法恢复。已有合同校验记录会保留。</p>
+      <p id="delete-rule-error" class="error" role="alert" hidden></p>
+      <footer><button id="cancel-delete-rule" class="cancel" type="button">取消</button><button id="confirm-delete-rule" class="confirm" type="button">确认删除</button></footer>
+    </div>
+  </dialog>
   <script>
+    const deleteDialog = document.querySelector('#delete-rule-dialog');
+    const deleteName = document.querySelector('#delete-rule-name');
+    const deleteError = document.querySelector('#delete-rule-error');
+    const confirmDelete = document.querySelector('#confirm-delete-rule');
+    let selectedRuleSetId = '';
+
+    document.querySelector('#rule-set-list').addEventListener('click', (event) => {
+      const button = event.target.closest('[data-delete-rule-set-id]');
+      if (!button) return;
+      selectedRuleSetId = button.dataset.deleteRuleSetId;
+      deleteName.textContent = button.dataset.deleteRuleSetName;
+      deleteError.hidden = true;
+      deleteDialog.showModal();
+    });
+    document.querySelector('#cancel-delete-rule').addEventListener('click', () => deleteDialog.close());
+    deleteDialog.addEventListener('close', () => { selectedRuleSetId = ''; });
+    confirmDelete.addEventListener('click', async () => {
+      if (!selectedRuleSetId) return;
+      confirmDelete.disabled = true;
+      confirmDelete.textContent = '删除中…';
+      deleteError.hidden = true;
+      try {
+        const response = await fetch(`/api/rule-sets/${encodeURIComponent(selectedRuleSetId)}`, { method: 'DELETE' });
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload.detail || '删除失败，请稍后再试。');
+        }
+        location.reload();
+      } catch (error) {
+        deleteError.textContent = error.message || '删除失败，请稍后再试。';
+        deleteError.hidden = false;
+      } finally {
+        confirmDelete.disabled = false;
+        confirmDelete.textContent = '确认删除';
+      }
+    });
+
     if (document.body.dataset.hasPending === 'true') {
       setTimeout(() => {
-        if (document.querySelector('[data-upload-loading]').dataset.uploading !== 'true') location.reload();
+        if (document.querySelector('[data-upload-loading]').dataset.uploading !== 'true' && !deleteDialog.open) location.reload();
       }, 5000);
     }
   </script>

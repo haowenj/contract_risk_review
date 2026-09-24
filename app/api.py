@@ -42,8 +42,10 @@ from app.evidence_review.repository import (
     DecisionConflictError,
     EvidenceReviewRepository,
     RuleSetRecord,
+    RuleSetDeletionNotAllowedError,
     RuleSetTransitionError,
 )
+from app.evidence_review.rule_set_deletion import delete_rule_set
 from app.evidence_review.rule_import import (
     RuleDocumentExtractor,
     RuleSetImportService,
@@ -753,6 +755,20 @@ def create_app(
             url=f"/rule-sets/{rule_set_id}",
             status_code=303,
         )
+
+    @application.delete("/api/rule-sets/{rule_set_id}", status_code=204)
+    def delete_rule_set_api(rule_set_id: str) -> Response:
+        try:
+            delete_rule_set(
+                active_rule_set_repository,
+                Path(settings.rule_sets_dir),
+                rule_set_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="rule set not found") from exc
+        except RuleSetDeletionNotAllowedError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return Response(status_code=204)
 
     @application.get(
         "/contracts/{contract_id}/evidence-review",

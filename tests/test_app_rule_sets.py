@@ -77,6 +77,75 @@ def test_rule_upload_page_shows_pending_upload_feedback(tmp_path: Path):
     assert 'aria-live="polite"' in response.text
 
 
+def test_rule_list_offers_confirmed_delete_for_finished_version(tmp_path: Path):
+    client, repository, _, _ = build_client(tmp_path)
+    finished = create_record(repository, tmp_path)
+    repository.mark_rule_set_processing(finished.rule_set_id)
+    repository.mark_rule_set_draft(finished.rule_set_id, draft_payload())
+    queued = create_record(repository, tmp_path)
+
+    page = client.get("/rule-sets")
+
+    assert f'data-delete-rule-set-id="{finished.rule_set_id}"' in page.text
+    assert f'data-delete-rule-set-id="{queued.rule_set_id}"' not in page.text
+    assert "删除规则版本" in page.text
+    assert "确认删除" in page.text
+
+
+def test_delete_rule_set_removes_files_and_keeps_review_history(tmp_path: Path):
+    client, repository, _, settings = build_client(tmp_path)
+    upload = client.post(
+        "/rule-sets",
+        data={"name": "可删除规则"},
+        files={"file": ("rules.md", "一、付款条件".encode(), "text/markdown")},
+        follow_redirects=False,
+    )
+    assert upload.status_code == 303
+    record = repository.list_rule_sets()[0]
+    repository.mark_rule_set_processing(record.rule_set_id)
+    repository.mark_rule_set_draft(record.rule_set_id, draft_payload())
+    repository.activate_rule_set(record.rule_set_id)
+    parsed_dir = settings.rule_sets_dir / record.rule_set_id
+    parsed_dir.mkdir()
+    (parsed_dir / "result.json").write_text("{}", encoding="utf-8")
+    run = repository.create_evidence_run(
+        contract_id="contract-1",
+        rule_set_id=record.rule_set_id,
+        rule_snapshot=draft_payload(),
+    )
+
+    response = client.delete(f"/api/rule-sets/{record.rule_set_id}")
+
+    assert response.status_code == 204
+    assert repository.get_rule_set(record.rule_set_id) is None
+    assert record.rule_set_id not in client.get("/rule-sets").text
+    assert not Path(record.source_path).parent.exists()
+    assert not parsed_dir.exists()
+    assert repository.get_evidence_run(run.run_id).rule_snapshot == draft_payload()
+
+
+def test_delete_rule_set_rejects_processing_and_unknown_versions(tmp_path: Path):
+    client, repository, _, _ = build_client(tmp_path)
+    record = create_record(repository, tmp_path)
+
+    assert client.delete(f"/api/rule-sets/{record.rule_set_id}").status_code == 409
+    assert client.delete("/api/rule-sets/missing").status_code == 404
+    assert repository.get_rule_set(record.rule_set_id) is not None
+
+
+def test_delete_rule_set_rejects_source_outside_rule_storage(tmp_path: Path):
+    client, repository, _, _ = build_client(tmp_path)
+    record = create_record(repository, tmp_path)
+    repository.mark_rule_set_processing(record.rule_set_id)
+    repository.mark_rule_set_draft(record.rule_set_id, draft_payload())
+
+    response = client.delete(f"/api/rule-sets/{record.rule_set_id}")
+
+    assert response.status_code == 409
+    assert repository.get_rule_set(record.rule_set_id) is not None
+    assert Path(record.source_path).is_file()
+
+
 def draft_payload() -> dict:
     return {
         "schema_version": "1.0",
