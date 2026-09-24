@@ -1,0 +1,27 @@
+<style>
+  .upload-feedback {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    grid-column: 1 / -1;
+    margin: 12px 0 0;
+    color: #315b8c;
+    font-weight: 650;
+  }
+  .upload-feedback[hidden] { display: none; }
+  .upload-spinner {
+    width: 18px;
+    height: 18px;
+    flex: none;
+    border: 2px solid #bfdbfe;
+    border-top-color: #2563eb;
+    border-radius: 50%;
+    animation: upload-spin .8s linear infinite;
+  }
+  @keyframes upload-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .upload-spinner { animation: none; border-color: #2563eb; }
+  }
+  .is-uploading .upload-zone { pointer-events: none; opacity: .7; }
+  .is-uploading [data-upload-trigger] { cursor: progress; }
+</style>

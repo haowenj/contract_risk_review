@@ -305,6 +305,7 @@
       .flow-grid { grid-template-columns:1fr; }
     }
   </style>
+  {% include "_upload_feedback_style.html" %}
 </head>
 <body data-poll-interval="10000">
   <header class="topbar">
@@ -328,7 +329,7 @@
         <span class="flow-eyebrow">主线 2 · 合同校验</span>
         <h2>上传合同</h2>
         <p>合同解析完成后，从下方合同列表选择已启用规则，执行校验并查看结果。</p>
-        <form id="upload-form" class="upload-form" action="/upload" method="post" enctype="multipart/form-data">
+        <form id="upload-form" class="upload-form" action="/upload" method="post" enctype="multipart/form-data" data-upload-loading>
           <label id="upload-dropzone" class="upload-zone">
             <strong>拖放合同 PDF 到这里</strong>
             <span>或选择本地文件 · 最大 200 MiB</span>
@@ -336,6 +337,7 @@
             <input id="pdf-file" name="file" type="file" accept=".pdf,application/pdf" hidden required>
             <span id="selected-file" class="selected-file"></span>
           </label>
+          <p class="upload-feedback" data-upload-status role="status" aria-live="polite" hidden><span class="upload-spinner" aria-hidden="true"></span>文件正在上传，请稍候，无需重复提交。</p>
         </form>
       </section>
     </div>
@@ -701,8 +703,8 @@
     confirmDelete.addEventListener('click', submitDelete);
 
     function submitFile(file) {
-      if (!file) return;
-      selectedFile.textContent = `正在上传：${file.name}`;
+      if (!file || uploadForm.dataset.uploading === 'true') return;
+      selectedFile.textContent = `已选择：${file.name}`;
       uploadForm.requestSubmit();
     }
 
@@ -725,6 +727,7 @@
     }
 
     uploadDropzone.addEventListener('drop', (event) => {
+      if (uploadForm.dataset.uploading === 'true') return;
       const file = event.dataTransfer.files[0];
       if (!file) return;
       const transfer = new DataTransfer();
@@ -737,5 +740,6 @@
     queueSummary.textContent = `${document.querySelectorAll('.status-ready').length} 个已就绪`;
     window.setInterval(refreshContracts, pollInterval);
   </script>
+  {% include "_upload_feedback_script.html" %}
 </body>
 </html>

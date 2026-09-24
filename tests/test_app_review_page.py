@@ -205,6 +205,8 @@ def test_ready_review_page_shows_text_and_txt_md_inputs():
     assert response.status_code == 200
     assert 'name="review_rule_text"' in response.text
     assert 'name="review_rule_file"' in response.text
+    assert 'data-upload-loading' in response.text
+    assert 'data-upload-status' in response.text
     assert 'accept=".txt,.md,text/plain,text/markdown"' in response.text
     assert "只选择一种输入方式" in response.text
 

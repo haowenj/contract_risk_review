@@ -170,6 +170,7 @@
       .field { grid-template-columns: 1fr; gap: 2px; }
     }
   </style>
+  {% include "_upload_feedback_style.html" %}
 </head>
 <body
   data-run-id="{{ run_id or '' }}"
@@ -194,7 +195,7 @@
       {% if not review_run and selected_contract.status == "ready" %}
         <h2>审查规范</h2>
         <p class="hint">可直接粘贴规范，或上传 UTF-8 编码的 .txt/.md 文件；请只选择一种输入方式。</p>
-        <form class="rule-form" action="/contracts/{{ selected_contract.contract_id }}/review/runs" method="post" enctype="multipart/form-data">
+        <form class="rule-form" action="/contracts/{{ selected_contract.contract_id }}/review/runs" method="post" enctype="multipart/form-data" data-upload-loading>
           <div>
             <label for="review-rule-text"><strong>手动粘贴</strong></label>
             <textarea id="review-rule-text" name="review_rule_text" placeholder="粘贴审查规范文本">{{ review_rule_text }}</textarea>
@@ -204,8 +205,9 @@
             <input id="review-rule-file" name="review_rule_file" type="file" accept=".txt,.md,text/plain,text/markdown">
           </div>
           <div class="actions">
-            <button class="primary" type="submit">解析审查规范</button>
+            <button class="primary" type="submit" data-upload-trigger>解析审查规范</button>
           </div>
+          <p class="upload-feedback" data-upload-status role="status" aria-live="polite" hidden><span class="upload-spinner" aria-hidden="true"></span>正在提交审查规范，请稍候，无需重复提交。</p>
         </form>
       {% elif not review_run %}
         <div class="run-status">当前合同尚未完成入库，暂时不能创建风险审查任务。</div>
@@ -335,5 +337,6 @@
       window.setTimeout(pollRun, 1000);
     }
   </script>
+  {% include "_upload_feedback_script.html" %}
 </body>
 </html>

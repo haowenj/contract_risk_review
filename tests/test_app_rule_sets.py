@@ -66,6 +66,17 @@ def build_client(tmp_path: Path):
     return TestClient(app), repository, importer, settings
 
 
+def test_rule_upload_page_shows_pending_upload_feedback(tmp_path: Path):
+    client, _, _, _ = build_client(tmp_path)
+
+    response = client.get("/rule-sets")
+
+    assert response.status_code == 200
+    assert 'data-upload-loading' in response.text
+    assert 'data-upload-status' in response.text
+    assert 'aria-live="polite"' in response.text
+
+
 def draft_payload() -> dict:
     return {
         "schema_version": "1.0",

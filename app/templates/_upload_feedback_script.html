@@ -1,0 +1,27 @@
+<script>
+  const uploadForms = document.querySelectorAll('[data-upload-loading]');
+
+  for (const form of uploadForms) {
+    form.addEventListener('submit', (event) => {
+      if (form.dataset.uploading === 'true') {
+        event.preventDefault();
+        return;
+      }
+      form.dataset.uploading = 'true';
+      form.classList.add('is-uploading');
+      form.querySelector('[data-upload-status]').hidden = false;
+      const trigger = form.querySelector('[data-upload-trigger]');
+      if (trigger) trigger.disabled = true;
+    });
+  }
+
+  window.addEventListener('pageshow', () => {
+    for (const form of uploadForms) {
+      form.dataset.uploading = 'false';
+      form.classList.remove('is-uploading');
+      form.querySelector('[data-upload-status]').hidden = true;
+      const trigger = form.querySelector('[data-upload-trigger]');
+      if (trigger) trigger.disabled = false;
+    }
+  });
+</script>

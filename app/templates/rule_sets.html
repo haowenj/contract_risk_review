@@ -29,6 +29,7 @@
     .empty { text-align:center; padding:36px; border:1px dashed #aebed0; border-radius:12px; color:#637189; }
     @media(max-width:720px){ form{grid-template-columns:1fr}.row{align-items:flex-start;flex-direction:column}main{width:calc(100% - 24px)} }
   </style>
+  {% include "_upload_feedback_style.html" %}
 </head>
 <body data-has-pending="{{ 'true' if rule_sets|selectattr('status', 'in', ['queued', 'processing'])|list else 'false' }}">
   <header class="topbar"><strong>风险规则库</strong><a href="/">返回合同校验</a></header>
@@ -37,10 +38,11 @@
     <p class="muted">上传规则文件 → 查看解析结果 → 确认启用。规则和合同可以分别上传；校验合同时只需选择已启用的规则。</p>
     {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
     <section class="panel">
-      <form action="/rule-sets" method="post" enctype="multipart/form-data">
+      <form action="/rule-sets" method="post" enctype="multipart/form-data" data-upload-loading>
         <label><span>规则集名称</span><input name="name" value="{{ submitted_name }}" required></label>
         <label><span>规则文件</span><input name="file" type="file" accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown" required></label>
-        <button type="submit">上传并解析</button>
+        <button type="submit" data-upload-trigger>上传并解析</button>
+        <p class="upload-feedback" data-upload-status role="status" aria-live="polite" hidden><span class="upload-spinner" aria-hidden="true"></span>文件正在上传，请稍候，无需重复提交。</p>
       </form>
     </section>
     <h2>规则列表</h2>
@@ -55,7 +57,12 @@
     </ul>
   </main>
   <script>
-    if (document.body.dataset.hasPending === 'true') setTimeout(() => location.reload(), 5000);
+    if (document.body.dataset.hasPending === 'true') {
+      setTimeout(() => {
+        if (document.querySelector('[data-upload-loading]').dataset.uploading !== 'true') location.reload();
+      }, 5000);
+    }
   </script>
+  {% include "_upload_feedback_script.html" %}
 </body>
 </html>
