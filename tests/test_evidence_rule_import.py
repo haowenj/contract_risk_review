@@ -408,6 +408,39 @@ def test_build_llm_uses_strict_rule_parse_json_schema():
     assert factory.call_args.kwargs["max_tokens"] == 8192
 
 
+def test_vllm_rule_parse_request_explicitly_disables_thinking(monkeypatch):
+    monkeypatch.setenv("LLM_BACKEND", "vllm")
+
+    bound = build_rule_parse_llm()
+    payload = bound.bound._get_request_payload("核验付款条件", **bound.kwargs)
+
+    assert payload["extra_body"] == {
+        "chat_template_kwargs": {"enable_thinking": False}
+    }
+    assert payload["max_completion_tokens"] == 8192
+
+
+@pytest.mark.parametrize("backend", [None, "bailian"])
+def test_bailian_rule_parse_request_keeps_existing_body(monkeypatch, backend):
+    if backend is None:
+        monkeypatch.delenv("LLM_BACKEND", raising=False)
+    else:
+        monkeypatch.setenv("LLM_BACKEND", backend)
+
+    bound = build_rule_parse_llm()
+    payload = bound.bound._get_request_payload("核验付款条件", **bound.kwargs)
+
+    assert "extra_body" not in payload
+    assert payload["reasoning_effort"] == "none"
+
+
+def test_rule_parse_rejects_unknown_llm_backend(monkeypatch):
+    monkeypatch.setenv("LLM_BACKEND", "unknown")
+
+    with pytest.raises(ValueError, match="LLM_BACKEND"):
+        build_rule_parse_llm()
+
+
 def test_import_splits_mineru_text_blocks_and_merges_local_ids(tmp_path: Path):
     class BatchLLM:
         def __init__(self):

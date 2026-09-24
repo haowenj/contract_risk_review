@@ -16,7 +16,7 @@ from app.image_schemas import (
     ImageSchemaError,
     validate_image_extraction,
 )
-from app.llm_gateway import invoke_llm
+from app.llm_gateway import invoke_llm, llm_backend_kwargs
 
 IMAGE_EXTRACTION_PROMPT = """请理解这张合同图片，并严格输出 JSON。
 
@@ -85,6 +85,7 @@ class ImageUnderstandingService:
                 timeout=timeout_seconds,
                 max_retries=0,
                 reasoning_effort="none",
+                **llm_backend_kwargs(),
             ).bind(response_format=IMAGE_RESPONSE_FORMAT)
 
     def classify_and_extract(self, image_path: Path) -> ImageExtraction:

@@ -18,7 +18,7 @@ from app.evidence_review.schemas import (
     RuleItem,
     StrictModel,
 )
-from app.llm_gateway import invoke_llm
+from app.llm_gateway import invoke_llm, llm_backend_kwargs
 
 LOGGER = logging.getLogger(__name__)
 FACT_EXTRACTION_TIMEOUT_SECONDS = 120.0
@@ -68,6 +68,7 @@ def build_fact_extraction_llm() -> Any:
         timeout=FACT_EXTRACTION_TIMEOUT_SECONDS,
         max_retries=0,
         reasoning_effort="none",
+        **llm_backend_kwargs(),
     ).bind(response_format=response_format)
 
 

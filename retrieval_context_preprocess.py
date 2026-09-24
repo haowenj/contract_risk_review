@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-import re
 import sys
 from collections.abc import Callable, Collection, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -11,12 +10,13 @@ from typing import Any
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 
+from app.llm_gateway import llm_backend_kwargs
+from image_searchable_text import image_to_searchable_text
 from mineru_to_nodes import (
     DEBUG_SOURCE_OBJECT_INDICES,
     INPUT_PATH,
     RETRIEVAL_CONTEXT_PATH,
 )
-from image_searchable_text import image_to_searchable_text
 from table_searchable_text import table_to_searchable_text
 
 MAX_RETRIEVAL_CONTEXT_CHARS = 160
@@ -40,6 +40,7 @@ context_llm = ChatOpenAI(
     timeout=CONTEXT_LLM_TIMEOUT_SECONDS,
     max_retries=0,
     reasoning_effort="none",
+    **llm_backend_kwargs(),
 )
 
 ContextGenerator = Callable[[str, list[str]], str | None]

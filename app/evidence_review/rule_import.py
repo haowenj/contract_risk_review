@@ -19,7 +19,7 @@ from app.evidence_review.repository import (
 )
 from app.evidence_review.rule_batching import RuleParseBatch, split_rule_document
 from app.evidence_review.schemas import RuleParseChunkResult, RuleParseResult
-from app.llm_gateway import MAX_CONCURRENT_LLM_CALLS, invoke_llm
+from app.llm_gateway import MAX_CONCURRENT_LLM_CALLS, invoke_llm, llm_backend_kwargs
 from mineru_raw_parse import run_parse
 
 LOGGER = logging.getLogger(__name__)
@@ -177,6 +177,7 @@ def build_rule_parse_llm() -> Any:
         timeout=RULE_PARSE_TIMEOUT_SECONDS,
         max_retries=0,
         reasoning_effort="none",
+        **llm_backend_kwargs(),
     ).bind(response_format=response_format)
 
 

@@ -8,7 +8,6 @@ from app.contract_review import service as contract_review_service
 from app.contract_review.service import ContractReviewService
 from app.service import ContractNotFoundError, ContractNotReadyError
 
-
 ITEMS = {
     "review_items": [
         {
@@ -118,7 +117,8 @@ def test_parse_then_continue_reuses_saved_items_without_parsing_again():
     assert service.nodes.parse_llm.calls == 1
 
 
-def test_default_llms_use_vllm_openai_reasoning_protocol():
+def test_default_llms_keep_bailian_request_options(monkeypatch):
+    monkeypatch.delenv("LLM_BACKEND", raising=False)
     with mock.patch.object(contract_review_service, "ChatOpenAI") as factory:
         contract_review_service.build_contract_review_service(
             contract_service=FakeContractService(ready_contract()),
@@ -128,6 +128,21 @@ def test_default_llms_use_vllm_openai_reasoning_protocol():
     for call in factory.call_args_list:
         assert call.kwargs["reasoning_effort"] == "none"
         assert "extra_body" not in call.kwargs
+
+
+def test_vllm_contract_review_request_disables_thinking(monkeypatch):
+    from app.contract_review.schemas import ReviewItemList
+
+    monkeypatch.setenv("LLM_BACKEND", "vllm")
+    bound = contract_review_service._build_structured_llm(
+        ReviewItemList,
+        schema_name="contract_review_items",
+    )
+
+    payload = bound.bound._get_request_payload("核验付款期限", **bound.kwargs)
+    assert payload["extra_body"] == {
+        "chat_template_kwargs": {"enable_thinking": False}
+    }
 
 
 def test_service_rejects_blank_inputs_before_contract_lookup():

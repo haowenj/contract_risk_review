@@ -12,6 +12,7 @@ from app.contract_review.schemas import (
     ReviewItemList,
     RiskDecision,
 )
+from app.llm_gateway import llm_backend_kwargs
 from app.service import ContractNotFoundError, ContractNotReadyError
 
 REVIEW_LLM_TIMEOUT_SECONDS = 120.0
@@ -38,6 +39,7 @@ def _build_structured_llm(
         timeout=REVIEW_LLM_TIMEOUT_SECONDS,
         max_retries=0,
         reasoning_effort="none",
+        **llm_backend_kwargs(),
     ).bind(response_format=response_format)
 
 

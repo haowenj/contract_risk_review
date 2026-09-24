@@ -11,7 +11,7 @@ from langchain_openai import ChatOpenAI
 from llama_index.core import VectorStoreIndex
 from llama_index.core.schema import MetadataMode
 
-from app.llm_gateway import invoke_llm
+from app.llm_gateway import invoke_llm, llm_backend_kwargs
 from mineru_to_nodes import (
     INPUT_PATH,
     RETRIEVAL_CONTEXT_PATH,
@@ -128,6 +128,7 @@ def _build_structured_llm(response_format: dict[str, Any]) -> Any:
         timeout=SUMMARY_TIMEOUT_SECONDS,
         max_retries=0,
         reasoning_effort="none",
+        **llm_backend_kwargs(),
     ).bind(response_format=response_format)
 
 
